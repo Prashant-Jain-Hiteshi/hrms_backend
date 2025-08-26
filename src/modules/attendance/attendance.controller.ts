@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Query, UseGuards, Req, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Get, Put, Body, Query, UseGuards, Req, BadRequestException, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { AttendanceService } from './attendance.service';
 import { CheckInDto } from './dto/check-in.dto';
@@ -47,14 +47,117 @@ export class AttendanceController {
     return this.attendanceService.summary(user, range);
   }
 
+  @Get('status')
+  @ApiOperation({ summary: 'Get attendance status and sessions for a date (defaults to today)' })
+  @ApiQuery({ name: 'date', required: false, type: String, example: '2025-08-26' })
+  async status(@Req() req: any, @Query('date') date?: string) {
+    const user = req.user as { id: string };
+    return this.attendanceService.status(user, date);
+  }
+
+  @Get('admin-status')
+  @ApiOperation({ summary: 'ADMIN/HR: Get attendance status and sessions for a user and date' })
+  @ApiQuery({ name: 'userId', required: true, type: String })
+  @ApiQuery({ name: 'date', required: false, type: String, example: '2025-08-26' })
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN, Role.HR)
+  async adminStatus(@Query('userId') userId: string, @Query('date') date?: string) {
+    return this.attendanceService.adminStatus(userId, date);
+  }
+
+  @Put('admin-session')
+  @ApiOperation({ summary: 'ADMIN/HR: Update a session check-in/check-out time' })
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN, Role.HR)
+  async adminUpdateSession(
+    @Body('sessionId') sessionId: string,
+    @Body('startTime') startTime?: string,
+    @Body('endTime') endTime?: string,
+  ) {
+    if (!sessionId) throw new BadRequestException('sessionId is required');
+    return this.attendanceService.adminUpdateSession(sessionId, { startTime, endTime });
+  }
+
   @Get()
   @ApiOperation({ summary: 'List all attendance (admin/hr)' })
+  @ApiQuery({ name: 'type', required: false, enum: ['monthly', 'daily'] })
+  @ApiQuery({ name: 'date', required: false, type: String, example: '2025-08-26' })
   @ApiQuery({ name: 'from', required: false, type: String, example: '2025-08-01' })
   @ApiQuery({ name: 'to', required: false, type: String, example: '2025-08-31' })
   @UseGuards(RolesGuard)
   @Roles(Role.ADMIN, Role.HR)
-  async listAll(@Query('from') from?: string, @Query('to') to?: string) {
-    return this.attendanceService.listAll(from, to);
+  async listAll(
+    @Query('type') type?: 'monthly' | 'daily',
+    @Query('date') date?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('status') status?: 'present' | 'late' | 'absent',
+  ) {
+    // If type/date provided, derive from/to to cover the range
+    if (type && date) {
+      if (type === 'daily') {
+        from = date;
+        to = date;
+      } else if (type === 'monthly') {
+        const d = new Date(date);
+        if (!isNaN(d.getTime())) {
+          const start = new Date(d.getFullYear(), d.getMonth(), 1);
+          const end = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+          from = start.toISOString().slice(0, 10);
+          to = end.toISOString().slice(0, 10);
+        }
+      }
+    }
+    // Special case: absent only supported for a single day (type=daily or from=to)
+    if (status === 'absent') {
+      const day = type === 'daily' && date ? date : (from && to && from === to ? from : undefined);
+      if (!day) {
+        throw new BadRequestException('status=absent requires type=daily&date or from=to');
+      }
+      return this.attendanceService.listAllByStatus(day, 'absent');
+    }
+    return this.attendanceService.listAll(from, to, status);
+  }
+
+  @Get('report')
+  @ApiOperation({ summary: 'ADMIN/HR: Export attendance report as CSV (Excel-compatible)' })
+  @ApiQuery({ name: 'type', required: false, enum: ['daily', 'monthly', 'range'] })
+  @ApiQuery({ name: 'date', required: false, type: String, example: '2025-08-26 or 2025-08' })
+  @ApiQuery({ name: 'from', required: false, type: String, example: '2025-08-01' })
+  @ApiQuery({ name: 'to', required: false, type: String, example: '2025-08-31' })
+  @ApiQuery({ name: 'format', required: false, enum: ['excel', 'pdf'] })
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN, Role.HR)
+  async exportReport(
+    @Res() res: any,
+    @Query('type') type: 'daily' | 'monthly' | 'range' = 'daily',
+    @Query('date') date?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('format') format: 'excel' | 'pdf' = 'excel',
+  ) {
+    // Derive from/to based on type/date if provided
+    if (type && date) {
+      if (type === 'daily') {
+        from = date;
+        to = date;
+      } else if (type === 'monthly') {
+        // Support yyyy-mm or yyyy-mm-dd
+        const isMonth = date.length === 7; // Check if date is in yyyy-mm format
+        const d = isMonth ? new Date(`${date}-01`) : new Date(date);
+        if (!isNaN(d.getTime())) {
+          const start = new Date(d.getFullYear(), d.getMonth(), 1);
+          const end = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+          from = start.toISOString().slice(0, 10);
+          to = end.toISOString().slice(0, 10);
+        }
+      }
+    }
+
+    const { buffer, filename, contentType } = await this.attendanceService.generateReport({ from, to, format });
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(buffer);
   }
 
   // DEV ONLY: seed last 4 weeks data for current user. Disabled in production.

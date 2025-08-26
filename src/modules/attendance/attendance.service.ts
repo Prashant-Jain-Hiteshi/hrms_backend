@@ -2,6 +2,7 @@ import { Injectable, BadRequestException, NotFoundException } from '@nestjs/comm
 import { InjectModel } from '@nestjs/sequelize';
 import { Op } from 'sequelize';
 import { Attendance } from './attendance.model';
+import { AttendanceSession } from './attendance-session.model';
 import { CheckInDto } from './dto/check-in.dto';
 import { CheckOutDto } from './dto/check-out.dto';
 import { Employee } from '../employees/employees.model';
@@ -27,6 +28,7 @@ function diffHours(start: string, end: string): number {
 export class AttendanceService {
   constructor(
     @InjectModel(Attendance) private readonly attendanceModel: typeof Attendance,
+    @InjectModel(AttendanceSession) private readonly sessionModel: typeof AttendanceSession,
     @InjectModel(Employee) private readonly employeeModel: typeof Employee,
   ) {}
 
@@ -37,7 +39,7 @@ export class AttendanceService {
     // Try to link employee by email (optional)
     const employee = await this.employeeModel.findOne({ where: { email: user.email } });
 
-    // Upsert attendance record for that date
+    // Upsert parent attendance record
     let record = await this.attendanceModel.findOne({ where: { userId: user.id, date } });
     if (!record) {
       record = await this.attendanceModel.create({
@@ -48,14 +50,18 @@ export class AttendanceService {
         status: this.isLate(checkInTime) ? 'late' : 'present',
       } as any);
     } else {
-      if (record.checkIn) {
-        throw new BadRequestException('Already checked in');
+      // update earliest checkIn if this is earlier
+      if (!record.checkIn || checkInTime < (record.checkIn as string)) {
+        await record.update({ checkIn: checkInTime, status: this.isLate(checkInTime) ? 'late' : (record.status || 'present') });
       }
-      await record.update({
-        checkIn: checkInTime,
-        status: this.isLate(checkInTime) ? 'late' : 'present',
-      });
     }
+
+    // Ensure no open session exists for today
+    const open = await this.sessionModel.findOne({ where: { userId: user.id, date, endTime: { [Op.is]: null } } });
+    if (open) throw new BadRequestException('You already have an active session. Please check out first.');
+
+    // Create a new session
+    await this.sessionModel.create({ attendanceId: record.id, userId: user.id, date, startTime: checkInTime } as any);
     return record;
   }
 
@@ -64,10 +70,21 @@ export class AttendanceService {
     const checkOutTime = dto.checkOutTime || nowTime();
 
     const record = await this.attendanceModel.findOne({ where: { userId: user.id, date } });
-    if (!record) throw new NotFoundException('No check-in found for today');
-    if (record.checkOut) throw new BadRequestException('Already checked out');
-    const hoursWorked = record.checkIn ? diffHours(record.checkIn, checkOutTime) : null;
-    await record.update({ checkOut: checkOutTime, hoursWorked });
+    if (!record) throw new NotFoundException('No attendance record for today');
+
+    // Find open session
+    const session = await this.sessionModel.findOne({ where: { userId: user.id, date, endTime: { [Op.is]: null } }, order: [['createdAt', 'DESC']] });
+    if (!session) throw new BadRequestException('No active session to check out');
+
+    const start = session.startTime as string;
+    const duration = diffHours(start, checkOutTime);
+    await session.update({ endTime: checkOutTime, hours: duration });
+
+    // Re-aggregate hours from all sessions for today
+    const sessions = await this.sessionModel.findAll({ where: { userId: user.id, date } });
+    const totalHours = sessions.reduce((sum, s: any) => sum + (Number(s.hours) || 0), 0);
+    const lastEnd = sessions.reduce((max, s: any) => (s.endTime && s.endTime > max ? s.endTime : max), record.checkOut || '00:00:00');
+    await record.update({ hoursWorked: Number(totalHours.toFixed(2)), checkOut: lastEnd || checkOutTime });
     return record;
   }
 
@@ -79,6 +96,289 @@ export class AttendanceService {
 
     const rows = await this.attendanceModel.findAll({ where, order: [['date', 'DESC']] });
     return rows;
+  }
+
+  // Build an Excel-compatible CSV report for Admin/HR
+  async generateReport(params: { from?: string; to?: string; format?: 'excel' | 'pdf' }) {
+    const { from, to, format = 'excel' } = params || {};
+    const rows = await this.listAll(from, to);
+
+    const headers = [
+      'Employee ID',
+      'Name',
+      'Department',
+      'Date',
+      'Check In',
+      'Check Out',
+      'Status',
+      'Hours',
+    ];
+
+    const safe = (v: any) => (v === null || v === undefined ? '' : String(v));
+
+    // If PDF requested, generate a paginated table PDF using pdfkit
+    if (format === 'pdf') {
+      // Lazy require to avoid type issues
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const PDFDocument = require('pdfkit');
+      const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 36 });
+
+      const chunks: Buffer[] = [];
+      const stream: NodeJS.WritableStream = doc as any;
+      doc.on('data', (c: Buffer) => chunks.push(c));
+      const endPromise = new Promise<Buffer>((resolve) => {
+        doc.on('end', () => resolve(Buffer.concat(chunks)));
+      });
+
+      // Title
+      doc.fontSize(16).text('Attendance Report', { align: 'center' });
+      const rangeText = from && to ? `${from} to ${to}` : (from || to || 'All Dates');
+      doc.moveDown(0.5).fontSize(10).text(`Range: ${rangeText}`, { align: 'center' });
+      doc.moveDown(1);
+
+      // Table layout
+      const startX = (doc as any).page.margins?.left ?? 36;
+      const startY = 100;
+      const rowHeight = 22;
+      // Base widths which we will scale to fit page
+      const baseWidths = [120, 140, 100, 70, 60, 60, 90, 50]; // ID, Name, Dept, Date, In, Out, Status, Hours
+      const pageRightMargin = (doc as any).page.margins?.right ?? 36;
+      const pageBottom = doc.page.height - ((doc as any).page.margins?.bottom ?? 36);
+      const availableWidth = doc.page.width - startX - pageRightMargin;
+      const totalBase = baseWidths.reduce((a, b) => a + b, 0);
+      const scale = availableWidth / totalBase;
+      const colWidths = baseWidths.map((w) => Math.floor(w * scale));
+
+      const padX = 6;
+      const padY = 6;
+
+      // Helper to measure wrapped text height for a cell
+      const measureCellHeight = (text: string, width: number, fontSize: number, bold = false) => {
+        doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(fontSize);
+        const h = doc.heightOfString(text || '', { width, align: 'left' });
+        return Math.max(h, 10);
+      };
+
+      const drawRow = (y: number, cols: string[], opts?: { header?: boolean; zebra?: boolean; index?: number }) => {
+        const isHeader = !!opts?.header;
+        const rowIndex = opts?.index ?? 0;
+        let x = startX;
+
+        // Background fill (header or zebra rows)
+        if (isHeader) {
+          // compute header height (allow wrapping headers if needed)
+          const headerHeights = cols.map((t, i) => measureCellHeight(String(t ?? ''), colWidths[i] - padX * 2, 10, true));
+          const rh = Math.max(rowHeight, Math.max(...headerHeights) + padY * 2);
+          doc.save().fillColor('#F2F2F2').rect(startX, y - 2, colWidths.reduce((a,b)=>a+b,0), rh).fill().restore();
+          // Text
+          doc.fontSize(10).font('Helvetica-Bold').fillColor('#111111');
+          x = startX;
+          cols.forEach((text, idx) => {
+            const w = colWidths[idx];
+            const available = w - padX * 2;
+            doc.text(String(text ?? ''), x + padX, y + padY, { width: available, align: 'left' });
+            x += w;
+          });
+          // Borders
+          x = startX;
+          doc.strokeColor('#DDDDDD');
+          doc.moveTo(x, y - 2).lineTo(x + colWidths.reduce((a,b)=>a+b,0), y - 2).stroke();
+          doc.moveTo(x, y - 2 + rh).lineTo(x + colWidths.reduce((a,b)=>a+b,0), y - 2 + rh).stroke();
+          for (const w of colWidths) { doc.moveTo(x, y - 2).lineTo(x, y - 2 + rh).stroke(); x += w; }
+          return rh;
+        } else if (opts?.zebra && rowIndex % 2 === 1) {
+          // background will be drawn after height calc
+        }
+
+        // Measure dynamic row height based on wrapped content
+        const aligns: ('left'|'center'|'right')[] = ['left','left','left','left','center','center','center','right'];
+        const heights = cols.map((t, i) => measureCellHeight(String(t ?? ''), colWidths[i] - padX * 2, 9));
+        const rh = Math.max(rowHeight, Math.max(...heights) + padY * 2);
+
+        // Background for zebra rows
+        if (opts?.zebra && rowIndex % 2 === 1) {
+          doc.save().fillColor('#FCFCFC').rect(startX, y - 2, colWidths.reduce((a,b)=>a+b,0), rh).fill().restore();
+        }
+
+        // Text
+        doc.fontSize(9).font('Helvetica');
+        x = startX;
+        cols.forEach((text, idx) => {
+          const w = colWidths[idx];
+          const available = w - padX * 2;
+          doc.fillColor('#111111');
+          doc.text(String(text ?? ''), x + padX, y + padY, { width: available, align: aligns[idx] });
+          x += w;
+        });
+
+        // Borders
+        x = startX;
+        doc.strokeColor('#DDDDDD');
+        doc.moveTo(x, y - 2).lineTo(x + colWidths.reduce((a,b)=>a+b,0), y - 2).stroke();
+        doc.moveTo(x, y - 2 + rh).lineTo(x + colWidths.reduce((a,b)=>a+b,0), y - 2 + rh).stroke();
+        for (const w of colWidths) { doc.moveTo(x, y - 2).lineTo(x, y - 2 + rh).stroke(); x += w; }
+        return rh;
+      };
+
+      // Header
+      let y = startY;
+      const headerHeight = drawRow(y, headers, { header: true });
+      y += headerHeight;
+
+      // Rows with pagination
+      let idx = 0;
+      for (const r of rows as any[]) {
+        const employee = r.Employee || r.employee || {};
+        // Prefer human-readable employeeId; fallback to any internal id; shorten UUID-like only
+        let id = safe(employee.employeeId || r.employeeId || employee.id || r.userId || '');
+        if (id.length > 12 && /[0-9a-fA-F-]{20,}/.test(id)) id = id.replace(/-/g, '').slice(0, 8);
+        const name = safe(employee.name || r.name || '');
+        const dept = safe(employee.department || r.department || '');
+        const date = safe(r.date || '');
+        const checkIn = safe(r.checkIn || '');
+        const checkOut = safe(r.checkOut || '');
+        const status = safe(r.status || (r.checkIn ? 'present' : 'absent'));
+        const hours = safe(r.hoursWorked ?? '');
+
+        // compute height of this row to decide page break
+        const probeHeight = ((): number => {
+          const heights = [id, name, dept, date, checkIn, checkOut, status, hours].map((t, i) => measureCellHeight(String(t ?? ''), colWidths[i] - padX * 2, 9));
+          return Math.max(rowHeight, Math.max(...heights) + padY * 2);
+        })();
+        if (y + probeHeight > pageBottom) {
+          doc.addPage();
+          y = startY;
+          const hh = drawRow(y, headers, { header: true });
+          y += hh;
+        }
+        const rh = drawRow(y, [id, name, dept, date, checkIn, checkOut, status, hours], { zebra: true, index: idx });
+        y += rh;
+        idx += 1;
+      }
+
+      doc.end();
+      const buffer = await endPromise;
+      const rangeLabel = from && to ? `${from}_to_${to}` : (from || to || new Date().toISOString().slice(0, 10));
+      const filename = `attendance_${rangeLabel}.pdf`;
+      const contentType = 'application/pdf';
+      return { buffer, filename, contentType };
+    }
+
+    // Default: CSV for Excel
+    const toCSVRow = (arr: string[]) => arr.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',');
+    const lines: string[] = [];
+    lines.push(toCSVRow(headers));
+    for (const r of rows as any[]) {
+      const employee = r.Employee || r.employee || {};
+      const id = safe(employee.employeeId || r.employeeId || employee.id || '');
+      const name = safe(employee.name || r.name || '');
+      const dept = safe(employee.department || r.department || '');
+      const date = safe(r.date || '');
+      const checkIn = safe(r.checkIn || '');
+      const checkOut = safe(r.checkOut || '');
+      const status = safe(r.status || (r.checkIn ? 'present' : 'absent'));
+      const hours = safe(r.hoursWorked ?? '');
+      lines.push(toCSVRow([id, name, dept, date, checkIn, checkOut, status, hours]));
+    }
+
+    const csv = lines.join('\n');
+    const buffer = Buffer.from(csv, 'utf-8');
+    const rangeLabel = from && to ? `${from}_to_${to}` : (from || to || new Date().toISOString().slice(0, 10));
+    const filename = `attendance_${rangeLabel}.csv`;
+    const contentType = 'text/csv; charset=utf-8';
+
+    return { buffer, filename, contentType };
+  }
+
+  async status(user: { id: string }, date?: string) {
+    const day = date || toDateOnly(new Date());
+    const [record, openSession, sessions] = await Promise.all([
+      this.attendanceModel.findOne({ where: { userId: user.id, date: day } }),
+      this.sessionModel.findOne({ where: { userId: user.id, date: day, endTime: { [Op.is]: null } } }),
+      this.sessionModel.findAll({ where: { userId: user.id, date: day }, order: [['createdAt', 'ASC']] }),
+    ]);
+    const activeSession = !!openSession;
+    return {
+      date: day,
+      activeSession,
+      sessionStartTime: openSession?.startTime || null,
+      attendance: record,
+      sessions,
+    };
+  }
+
+  // Admin/HR: update a specific session's start/end time and re-aggregate parent attendance
+  async adminUpdateSession(sessionId: string, data: { startTime?: string; endTime?: string }) {
+    if (!sessionId) throw new BadRequestException('sessionId is required');
+    const session = await this.sessionModel.findByPk(sessionId);
+    if (!session) throw new NotFoundException('Session not found');
+
+    const startTime = data.startTime ?? (session.startTime as string);
+    const endTime = data.endTime ?? (session.endTime as string | null);
+
+    // Validate time format HH:MM:SS (basic)
+    const isTime = (t?: string | null) => !t || /^\d{2}:\d{2}:\d{2}$/.test(t);
+    if (!isTime(startTime) || !isTime(endTime || undefined)) {
+      throw new BadRequestException('Time must be HH:MM:SS');
+    }
+
+    // Recompute session hours if end exists
+    let hours = Number(session.hours) || 0;
+    if (endTime) {
+      const [sh, sm, ss] = startTime.split(':').map(Number);
+      const [eh, em, es] = endTime.split(':').map(Number);
+      const startMin = sh * 60 + sm + (ss || 0) / 60;
+      const endMin = eh * 60 + em + (es || 0) / 60;
+      const diff = Math.max(0, endMin - startMin);
+      hours = Number((diff / 60).toFixed(2));
+    } else {
+      hours = 0;
+    }
+
+    await session.update({ startTime, endTime: endTime ?? null, hours });
+
+    // Re-aggregate parent attendance record
+    const date = session.date as string;
+    const userId = session.userId as string;
+    const record = await this.attendanceModel.findOne({ where: { userId, date } });
+    if (record) {
+      const sessions = await this.sessionModel.findAll({ where: { userId, date } });
+      const totalHours = sessions.reduce((sum, s: any) => sum + (Number(s.hours) || 0), 0);
+      const firstStart = sessions.reduce((min: string | null, s: any) => {
+        const st = s.startTime as string | null;
+        if (!st) return min;
+        if (!min) return st;
+        return st < min ? st : min;
+      }, null);
+      const lastEnd = sessions.reduce((max: string | null, s: any) => {
+        const et = s.endTime as string | null;
+        if (!et) return max;
+        if (!max) return et;
+        return et > max ? et : max;
+      }, null);
+      await record.update({ hoursWorked: Number(totalHours.toFixed(2)), checkIn: firstStart || record.checkIn, checkOut: lastEnd || record.checkOut });
+    }
+
+    return { session, updatedHours: hours };
+  }
+
+  // Admin/HR: get status and sessions for a specific user on a date
+  async adminStatus(targetUserId: string, date?: string) {
+    if (!targetUserId) throw new BadRequestException('userId is required');
+    const day = date || toDateOnly(new Date());
+    const [record, openSession, sessions] = await Promise.all([
+      this.attendanceModel.findOne({ where: { userId: targetUserId, date: day } }),
+      this.sessionModel.findOne({ where: { userId: targetUserId, date: day, endTime: { [Op.is]: null } } }),
+      this.sessionModel.findAll({ where: { userId: targetUserId, date: day }, order: [['createdAt', 'ASC']] }),
+    ]);
+    const activeSession = !!openSession;
+    return {
+      date: day,
+      activeSession,
+      sessionStartTime: openSession?.startTime || null,
+      attendance: record,
+      sessions,
+    };
   }
 
   async summary(user: { id: string }, range: 'week' | 'month') {
@@ -121,8 +421,11 @@ export class AttendanceService {
 
   private countWorkingDays(start: Date, end: Date) {
     const cur = new Date(start);
+    cur.setHours(0, 0, 0, 0);
+    const last = new Date(end);
+    last.setHours(0, 0, 0, 0);
     let count = 0;
-    while (cur <= end) {
+    while (cur <= last) {
       const day = cur.getDay();
       if (day !== 0 && day !== 6) count++;
       cur.setDate(cur.getDate() + 1);
@@ -130,31 +433,61 @@ export class AttendanceService {
     return count;
   }
 
-  // Admin/HR: list all attendance with optional date range
-  async listAll(from?: string, to?: string) {
+  // Admin/HR: list all attendance with optional date range and status filter (present|late)
+  async listAll(from?: string, to?: string, status?: 'present' | 'late') {
     const where: any = {};
     if (from && to) where.date = { [Op.between]: [from, to] };
     else if (from) where.date = { [Op.gte]: from };
     else if (to) where.date = { [Op.lte]: to };
 
+    if (status === 'late') {
+      where.status = 'late';
+    } else if (status === 'present') {
+      where.checkIn = { [Op.not]: null } as any;
+      where.status = { [Op.ne]: 'late' } as any;
+    }
+
     const rows = await this.attendanceModel.findAll({
       where,
-      include: [{
-        model: Employee,
-        attributes: ['id', 'name', 'email', 'employeeId', 'department', 'designation'],
-      }],
+      include: [{ model: Employee, attributes: ['id', 'name', 'email', 'employeeId', 'department', 'designation'] }],
       order: [['date', 'DESC']],
     });
     return rows;
   }
 
-  // DEV ONLY: seed last N weeks with given present counts per week for current user
-  async seedLastWeeks(user: { id: string; email?: string }, weeksCounts: number[] = [2, 4, 5, 3]) {
-    if (process.env.NODE_ENV === 'production') {
-      throw new BadRequestException('Seeding is disabled in production');
+  // Admin/HR: list all ABSENT employees for a single day by synthesizing rows
+  async listAllByStatus(day: string, status: 'absent') {
+    if (!day) throw new BadRequestException('day is required');
+    // Fetch all employees
+    const emps = await this.employeeModel.findAll({ attributes: ['id', 'name', 'email', 'employeeId', 'department', 'designation'] });
+    // Fetch any attendance records for that day
+    const todays = await this.attendanceModel.findAll({ where: { date: day }, attributes: ['employeeId', 'checkIn'] });
+    const presentEmployeeIds = new Set<string>();
+    for (const r of todays as any[]) {
+      if ((r as any).checkIn) presentEmployeeIds.add(String((r as any).employeeId));
     }
 
-    // Helper: get Monday of a week offset (0=current week, 1=last week, ...)
+    // Build synthetic absent rows for employees without a check-in
+    const rows = (emps as any[])
+      .filter((e) => !presentEmployeeIds.has(String(e.id)))
+      .map((e) => ({
+        id: `abs-${e.id}-${day}`,
+        userId: null,
+        employeeId: e.id,
+        date: day,
+        checkIn: null,
+        checkOut: null,
+        status: 'absent',
+        hoursWorked: 0,
+        Employee: e,
+      }));
+    rows.sort((a: any, b: any) => String(a.Employee?.name || '').localeCompare(String(b.Employee?.name || '')));
+    return rows as any[];
+  }
+
+  // DEV ONLY: seed last up to 4 weeks with present days according to counts array (length <= 4)
+  async seedLastWeeks(user: { id: string; email?: string }, weeksCounts: number[]) {
+    const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
     const mondayOf = (weeksAgo: number) => {
       const today = new Date();
       const day = today.getDay(); // 0..6 Sun..Sat
@@ -165,9 +498,9 @@ export class AttendanceService {
       return monday;
     };
 
-    // For each target week, create `count` present days on random weekdays (Mon-Fri)
-    for (let i = 0; i < Math.min(4, weeksCounts.length); i++) {
-      const count = Math.max(0, Math.min(5, Math.floor(weeksCounts[i] || 0)));
+    const maxWeeks = Math.min(4, weeksCounts?.length || 0);
+    for (let i = 0; i < maxWeeks; i++) {
+      const count = clamp(Math.floor(weeksCounts[i] || 0), 0, 5);
       const weekMonday = mondayOf(i);
       const candidates: string[] = [];
       for (let d = 0; d < 5; d++) {
@@ -175,14 +508,13 @@ export class AttendanceService {
         date.setDate(weekMonday.getDate() + d);
         candidates.push(toDateOnly(date));
       }
-      // shuffle
+      // shuffle candidates
       for (let j = candidates.length - 1; j > 0; j--) {
         const k = Math.floor(Math.random() * (j + 1));
         [candidates[j], candidates[k]] = [candidates[k], candidates[j]];
       }
       const chosen = candidates.slice(0, count);
       for (const date of chosen) {
-        // avoid duplicate create if exists
         const existing = await this.attendanceModel.findOne({ where: { userId: user.id, date } });
         if (existing?.checkIn) continue;
         if (existing) {
@@ -198,10 +530,9 @@ export class AttendanceService {
       }
     }
 
-    // Return summary of what exists now for those weeks
-    const from = toDateOnly(mondayOf(3));
+    const from = toDateOnly(mondayOf(maxWeeks - 1 >= 0 ? maxWeeks - 1 : 0));
     const to = toDateOnly(new Date());
     const rows = await this.attendanceModel.findAll({ where: { userId: user.id, date: { [Op.between]: [from, to] } }, order: [['date', 'ASC']] });
-    return { from, to, count: rows.length, records: rows };
+    return { from, to, count: rows.length };
   }
 }

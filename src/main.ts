@@ -3,6 +3,7 @@ import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import type { Request, Response, NextFunction } from 'express';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -24,6 +25,13 @@ async function bootstrap() {
       'sec-ch-ua-mobile',
       'sec-ch-ua-platform',
     ],
+  });
+  // Ensure CORS preflight (OPTIONS) is not blocked by guards
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(204);
+    }
+    next();
   });
   // Global validation pipes
   app.useGlobalPipes(
