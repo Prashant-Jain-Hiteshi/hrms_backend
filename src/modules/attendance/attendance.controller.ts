@@ -160,6 +160,14 @@ export class AttendanceController {
     return res.send(buffer);
   }
 
+  @Get('weekly')
+  @ApiOperation({ summary: 'ADMIN/HR: Get current week attendance overview (Mon–Fri)' })
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN, Role.HR)
+  async weekly() {
+    return this.attendanceService.weeklyOverview();
+  }
+
   // DEV ONLY: seed last 4 weeks data for current user. Disabled in production.
   @Post('seed-weeks')
   @ApiOperation({ summary: '[DEV] Seed last weeks attendance for current user (e.g., counts=2,4,5,3)' })

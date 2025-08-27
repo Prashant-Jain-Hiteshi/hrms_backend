@@ -485,6 +485,108 @@ export class AttendanceService {
     return rows as any[];
   }
 
+  // Admin/HR: aggregate current week's attendance per weekday (Mon–Fri)
+  async weeklyOverview() {
+    // Compute current week's Monday to Sunday range, but only output Mon–Fri
+    const today = new Date();
+    const day = today.getDay(); // 0..6 (Sun..Sat)
+    const diffToMonday = (day + 6) % 7; // Monday index
+    const monday = new Date(today);
+    monday.setHours(0, 0, 0, 0);
+    monday.setDate(today.getDate() - diffToMonday);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+
+    const ymd = (d: Date) => {
+      const pad2 = (n: number) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    };
+    const from = ymd(monday);
+    const to = ymd(sunday);
+
+    // Determine active employees count; fallback to total if status column unavailable
+    let activeEmployees = 0;
+    const normalizeCount = (val: any): number => {
+      if (Array.isArray(val)) {
+        // GroupedCountResultItem[] -> sum counts
+        return val.reduce((sum: number, item: any) => sum + Number(item?.count || 0), 0);
+      }
+      const n = Number(val);
+      return Number.isFinite(n) ? n : 0;
+    };
+    try {
+      const c1 = await (this.employeeModel as any).count({ where: { status: 'active' } });
+      activeEmployees = normalizeCount(c1);
+      if (activeEmployees <= 0) {
+        const c2 = await (this.employeeModel as any).count();
+        activeEmployees = normalizeCount(c2);
+      }
+    } catch {
+      const c2 = await (this.employeeModel as any).count();
+      activeEmployees = normalizeCount(c2);
+    }
+
+    // Fetch all attendance records for this week
+    const rows = await this.attendanceModel.findAll({
+      where: { date: { [Op.between]: [from, to] } },
+      attributes: ['userId', 'employeeId', 'date', 'checkIn', 'status'],
+      order: [['date', 'ASC']],
+    });
+
+    // Helper: label for weekday (server local)
+    const dayLabel = (d: Date) => d.toLocaleDateString('en-US', { weekday: 'short' });
+
+    // Build Mon–Fri list
+    const days: { date: string; name: string }[] = [];
+    for (let i = 0; i < 5; i++) {
+      const dd = new Date(monday);
+      dd.setDate(monday.getDate() + i);
+      days.push({ date: ymd(dd), name: dayLabel(dd) });
+    }
+
+    // Index rows by date
+    const byDate = new Map<string, any[]>();
+    for (const r of rows as any[]) {
+      const key = String((r as any).date);
+      const arr = byDate.get(key) || [];
+      arr.push(r);
+      byDate.set(key, arr);
+    }
+
+    const lateCutoff = (process.env.LATE_CUTOFF || '09:15:00').trim();
+    const data = days.map(({ date, name }) => {
+      const records = byDate.get(date) || [];
+      // group records by canonical person id
+      const byPerson = new Map<string, any[]>();
+      for (const rec of records as any[]) {
+        const pid = String(rec.userId || rec.employeeId || '');
+        if (!pid) continue;
+        const arr = byPerson.get(pid) || [];
+        arr.push(rec);
+        byPerson.set(pid, arr);
+      }
+
+      let present = 0;
+      let late = 0;
+      for (const [, arr] of byPerson) {
+        // present if any row has a checkIn
+        const anyCheckIn = arr.some(r => !!r.checkIn);
+        if (anyCheckIn) present += 1;
+        // late if earliest check-in time is after cutoff (HH:MM:SS)
+        const withCheckIn = arr.filter(r => !!r.checkIn);
+        if (withCheckIn.length > 0) {
+          withCheckIn.sort((a, b) => String(a.checkIn).localeCompare(String(b.checkIn)));
+          const first = String(withCheckIn[0].checkIn);
+          if (first && first > lateCutoff) late += 1;
+        }
+      }
+      const absent = Math.max(0, activeEmployees - present);
+      return { date, name, present, late, absent };
+    });
+
+    return { from, to, totalEmployees: activeEmployees, days: data };
+  }
+
   // DEV ONLY: seed last up to 4 weeks with present days according to counts array (length <= 4)
   async seedLastWeeks(user: { id: string; email?: string }, weeksCounts: number[]) {
     const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
