@@ -82,6 +82,13 @@ export class LeaveController {
     return this.leaveService.getLeaveRequestsMentions(req.user.employeeId);
   }
 
+  @Get('balance')
+  @ApiOperation({ summary: 'Get leave balance for current user' })
+  @ApiResponse({ status: 200, description: 'Leave balance retrieved successfully' })
+  async getLeaveBalance(@Request() req: any) {
+    return this.leaveService.getLeaveBalance(req.user.employeeId);
+  }
+
   @Get('statistics')
   @ApiOperation({ summary: 'Get leave statistics' })
   @ApiResponse({ status: 200, description: 'Leave statistics retrieved successfully' })

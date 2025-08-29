@@ -464,6 +464,57 @@ export class LeaveService {
     return this.getLeaveRequestById(id);
   }
 
+  async getLeaveBalance(employeeId: string) {
+    // Get all leave types (hardcoded for now, will be dynamic when LeaveTypes module is added)
+    const leaveTypes = [
+      { name: 'Annual Leave', numberOfLeaves: 20 },
+      { name: 'Sick Leave', numberOfLeaves: 10 },
+      { name: 'Casual Leave', numberOfLeaves: 5 },
+      { name: 'Maternity Leave', numberOfLeaves: 90 },
+      { name: 'Paternity Leave', numberOfLeaves: 15 },
+      { name: 'Emergency Leave', numberOfLeaves: 3 }
+    ];
+
+    // Get approved leave requests for this employee
+    const approvedLeaves = await this.leaveRequestModel.findAll({
+      where: {
+        employeeId,
+        status: 'approved'
+      },
+      attributes: ['leaveType', 'startDate', 'endDate']
+    });
+
+    // Calculate used days per leave type
+    const balance: Record<string, any> = {};
+    
+    leaveTypes.forEach(leaveType => {
+      const typeName = leaveType.name.toLowerCase().replace(/\s+/g, '');
+      const typeLeaves = approvedLeaves.filter(leave => {
+        const leaveTypeName = leave.leaveType.toLowerCase().replace(/\s+/g, '');
+        return leaveTypeName === typeName || 
+               leaveTypeName === leaveType.name.toLowerCase().replace(' leave', '');
+      });
+
+      const usedDays = typeLeaves.reduce((total, leave) => {
+        // Calculate days between start and end date
+        const start = new Date(leave.startDate);
+        const end = new Date(leave.endDate);
+        const diffTime = Math.abs(end.getTime() - start.getTime());
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 to include both start and end date
+        return total + diffDays;
+      }, 0);
+
+      balance[typeName] = {
+        total: leaveType.numberOfLeaves,
+        used: usedDays,
+        remaining: Math.max(0, leaveType.numberOfLeaves - usedDays),
+        displayName: leaveType.name
+      };
+    });
+
+    return balance;
+  }
+
   async getLeaveStatistics(employeeId?: string) {
     let whereClause: any = {};
     
