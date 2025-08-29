@@ -7,12 +7,15 @@ import { AuthController } from './auth.controller';
 import { UsersModule } from '../users/users.module';
 import { LocalStrategy } from './strategies/local.strategy';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { SequelizeModule } from '@nestjs/sequelize';
+import { Employee } from '../employees/employees.model';
 
 @Module({
   imports: [
     UsersModule,
     PassportModule,
     ConfigModule,
+    SequelizeModule.forFeature([Employee]),
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
