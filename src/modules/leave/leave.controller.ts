@@ -89,6 +89,72 @@ export class LeaveController {
     return this.leaveService.getLeaveBalance(req.user.employeeId);
   }
 
+  // Admin: Configure monthly leave credits
+  @Post('credit-config')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Configure monthly leave credits (Admin only)' })
+  @ApiResponse({ status: 201, description: 'Leave credit configuration created successfully' })
+  async configureLeaveCreditConfig(@Body() configData: any) {
+    return this.leaveService.configureLeaveCreditConfig(configData);
+  }
+
+  @Get('credit-config')
+  @Roles('admin', 'hr', 'employee')
+  @ApiOperation({ summary: 'Get leave credit configurations' })
+  @ApiResponse({ status: 200, description: 'Leave credit configurations retrieved successfully' })
+  async getLeaveCreditConfigs() {
+    return this.leaveService.getLeaveCreditConfigs();
+  }
+
+  @Put('credit-config/:leaveType')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Update leave credit configuration (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Leave credit configuration updated successfully' })
+  async updateLeaveCreditConfig(
+    @Param('leaveType') leaveType: string,
+    @Body() updateData: any
+  ) {
+    return this.leaveService.updateLeaveCreditConfig(leaveType, updateData);
+  }
+
+  // Admin: Manual credit leave
+  @Post('manual-credit')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Manually credit leave to employee (Admin only)' })
+  @ApiResponse({ status: 201, description: 'Leave credited successfully' })
+  async manualCreditLeave(@Body() creditData: any) {
+    return this.leaveService.manualCreditLeave(creditData);
+  }
+
+  // Admin: Trigger monthly credits
+  @Post('trigger-monthly-credits')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Trigger monthly credit processing (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Monthly credit processing triggered' })
+  async triggerMonthlyCredits() {
+    return this.leaveService.triggerMonthlyCredits();
+  }
+
+  // Get employee's credit history
+  @Get('credit-history/:employeeId')
+  @Roles('admin', 'hr')
+  @ApiOperation({ summary: 'Get employee leave credit history' })
+  @ApiResponse({ status: 200, description: 'Employee credit history retrieved successfully' })
+  async getEmployeeCreditHistory(
+    @Param('employeeId') employeeId: string,
+    @Query('year') year?: number
+  ) {
+    return this.leaveService.getEmployeeCreditHistory(employeeId, year);
+  }
+
+  // Get my credit history
+  @Get('my-credit-history')
+  @ApiOperation({ summary: 'Get current user leave credit history' })
+  @ApiResponse({ status: 200, description: 'User credit history retrieved successfully' })
+  async getMyCreditHistory(@Request() req: any, @Query('year') year?: number) {
+    return this.leaveService.getEmployeeCreditHistory(req.user.employeeId, year);
+  }
+
   @Get('statistics')
   @ApiOperation({ summary: 'Get leave statistics' })
   @ApiResponse({ status: 200, description: 'Leave statistics retrieved successfully' })
@@ -96,6 +162,22 @@ export class LeaveController {
     // Admin can get stats for any employee, others only for themselves
     const targetEmployeeId = req.user.role === 'admin' ? employeeId : req.user.employeeId;
     return this.leaveService.getLeaveStatistics(targetEmployeeId);
+  }
+
+  // Monthly ledger (deducted days) for a date range
+  @Get('monthly-ledger')
+  @Roles('admin', 'hr', 'employee')
+  @ApiOperation({ summary: 'Get monthly deducted leave days for a date range' })
+  @ApiResponse({ status: 200, description: 'Monthly ledger retrieved successfully' })
+  async getMonthlyLedger(
+    @Request() req: any,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('employeeId') employeeId?: string,
+  ) {
+    // Admin can query any employeeId; others default to self
+    const targetEmployeeId = req.user.role === 'admin' && employeeId ? employeeId : req.user.employeeId;
+    return this.leaveService.getMonthlyLedger(targetEmployeeId, from, to);
   }
 
   @Get(':id')

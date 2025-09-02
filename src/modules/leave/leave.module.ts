@@ -7,6 +7,7 @@ import { LeaveTypeService } from './leave-type.service';
 import { LeaveRequest, LeaveApprover, LeaveCc, LeaveStatusHistory } from './leave.model';
 import { LeaveType } from './leave-type.model';
 import { Employee } from '../employees/employees.model';
+import { LeaveCredit, LeaveCreditConfig } from './leave-credit.model';
 
 @Module({
   imports: [
@@ -17,6 +18,8 @@ import { Employee } from '../employees/employees.model';
       LeaveStatusHistory,
       LeaveType,
       Employee,
+      LeaveCredit,
+      LeaveCreditConfig,
     ]),
   ],
   controllers: [LeaveController, LeaveTypeController],
