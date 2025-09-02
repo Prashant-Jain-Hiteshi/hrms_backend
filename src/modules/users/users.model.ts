@@ -1,5 +1,6 @@
-import { Table, Column, Model, DataType, Default, PrimaryKey, IsEmail, Unique, AllowNull } from 'sequelize-typescript';
+import { Table, Column, Model, DataType, Default, PrimaryKey, IsEmail, Unique, AllowNull, HasOne } from 'sequelize-typescript';
 import { Role } from '../../common/enums/role.enum';
+import { Employee } from '../employees/employees.model';
 
 @Table({ tableName: 'users', timestamps: true })
 export class User extends Model {
@@ -47,6 +48,10 @@ export class User extends Model {
   @AllowNull(true)
   @Column(DataType.DATE)
   declare lastLoginAt?: Date | null;
+
+  // Association with Employee
+  @HasOne(() => Employee, { foreignKey: 'email', sourceKey: 'email', as: 'employee' })
+  declare employee?: Employee;
 
   // Hide sensitive fields from API responses
   toJSON() {

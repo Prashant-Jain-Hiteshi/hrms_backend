@@ -1,5 +1,6 @@
 import { Table, Column, Model, DataType, Default, PrimaryKey, AllowNull, ForeignKey, BelongsTo, HasMany } from 'sequelize-typescript';
 import { Employee } from '../employees/employees.model';
+import { LeaveType, LeaveStatus } from './leave.types';
 
 @Table({ tableName: 'leave_requests', timestamps: true })
 export class LeaveRequest extends Model {
@@ -17,8 +18,9 @@ export class LeaveRequest extends Model {
   declare employee: Employee;
 
   @AllowNull(false)
-  @Column({ type: DataType.ENUM('sick', 'casual', 'annual', 'maternity', 'paternity', 'emergency', 'other') })
-  declare leaveType: 'sick' | 'casual' | 'annual' | 'maternity' | 'paternity' | 'emergency' | 'other';
+  @Column({ type: DataType.ENUM(...Object.values(LeaveType).map(v => v.toString())) })
+  @AllowNull(false)
+  declare leaveType: LeaveType;
 
   @AllowNull(false)
   @Column(DataType.DATEONLY)
@@ -41,8 +43,16 @@ export class LeaveRequest extends Model {
   declare reason: string;
 
   @AllowNull(false)
-  @Column({ type: DataType.ENUM('pending', 'approved', 'rejected', 'cancelled'), defaultValue: 'pending' })
-  declare status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  @Column({ 
+    type: DataType.ENUM(
+      LeaveStatus.PENDING,
+      LeaveStatus.APPROVED,
+      LeaveStatus.REJECTED,
+      LeaveStatus.CANCELLED
+    ),
+    defaultValue: LeaveStatus.PENDING 
+  })
+  declare status: LeaveStatus;
 
   @AllowNull(true)
   @Column(DataType.TEXT)
@@ -94,8 +104,15 @@ export class LeaveApprover extends Model {
   declare employee: Employee;
 
   @AllowNull(false)
-  @Column({ type: DataType.ENUM('pending', 'approved', 'rejected'), defaultValue: 'pending' })
-  declare status: 'pending' | 'approved' | 'rejected';
+  @Column({ 
+    type: DataType.ENUM(
+      LeaveStatus.PENDING, 
+      LeaveStatus.APPROVED, 
+      LeaveStatus.REJECTED
+    ), 
+    defaultValue: LeaveStatus.PENDING 
+  })
+  declare status: LeaveStatus;
 
   @AllowNull(true)
   @Column(DataType.TEXT)
@@ -154,8 +171,15 @@ export class LeaveStatusHistory extends Model {
   declare leaveRequest: LeaveRequest;
 
   @AllowNull(false)
-  @Column({ type: DataType.ENUM('pending', 'approved', 'rejected', 'cancelled') })
-  declare status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  @Column({ 
+    type: DataType.ENUM(
+      LeaveStatus.PENDING,
+      LeaveStatus.APPROVED,
+      LeaveStatus.REJECTED,
+      LeaveStatus.CANCELLED
+    ) 
+  })
+  declare status: LeaveStatus;
 
   @AllowNull(true)
   @ForeignKey(() => Employee)

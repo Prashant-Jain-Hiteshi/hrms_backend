@@ -1,4 +1,5 @@
-import { Table, Column, Model, DataType, Default, PrimaryKey, AllowNull, Unique } from 'sequelize-typescript';
+import { Table, Column, Model, DataType, Default, PrimaryKey, AllowNull, Unique, BelongsTo } from 'sequelize-typescript';
+import { User } from '../users/users.model';
 
 @Table({ tableName: 'employees', timestamps: true })
 export class Employee extends Model {
@@ -48,4 +49,8 @@ export class Employee extends Model {
   @AllowNull(false)
   @Column({ type: DataType.ENUM('active', 'inactive'), defaultValue: 'active' })
   declare status: 'active' | 'inactive';
+
+  // Association with User
+  @BelongsTo(() => User, { foreignKey: 'email', targetKey: 'email', as: 'user' })
+  declare user?: User;
 }

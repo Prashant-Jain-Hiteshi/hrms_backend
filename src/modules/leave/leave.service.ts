@@ -1,10 +1,15 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
-import { LeaveRequest, LeaveApprover, LeaveCc, LeaveStatusHistory } from './leave.model';
-import { Employee } from '../employees/employees.model';
-import { LeaveCredit, LeaveCreditConfig } from './leave-credit.model';
-import { CreateLeaveDto, UpdateLeaveStatusDto } from './dto/create-leave.dto';
 import { Op } from 'sequelize';
+import { LeaveRequest, LeaveApprover, LeaveCc, LeaveStatusHistory } from './leave.model';
+import { LeaveStatus } from './leave.types';
+import { LeaveCredit, LeaveCreditConfig } from './leave-credit.model';
+// Leave DTOs are now imported from their respective files
+import { CreateLeaveDto, UpdateLeaveStatusDto } from './dto/create-leave.dto';
+import { User } from '../users/users.model';
+import { Employee } from '../employees/employees.model';
+import { CompensatoryLeaveService } from './compensatory-leave.service';
+import { Logger } from '@nestjs/common';
 
 @Injectable()
 export class LeaveService {
@@ -773,10 +778,14 @@ export class LeaveService {
     const deducted: Record<string, number> = {};
     const lwp: Record<string, number> = {};
 
+    // Get current leave balance to determine paid vs LWP deduction
+    const currentBalance = await this.getLeaveBalance(employeeId);
+    
     const dayMs = 24*60*60*1000;
     for (const rec of approved as any[]) {
       const type = String(rec.leaveType || '').toLowerCase();
-      const isLwp = (type === 'lwp' || type === 'leave without pay' || type === 'leavewithoutpay');
+      const isLwpType = (type === 'lwp' || type === 'leave without pay' || type === 'leavewithoutpay');
+      
       // Clamp leave to [start, endLastDay]
       const s0 = new Date(rec.startDate);
       const e0 = new Date(rec.endDate);
@@ -789,7 +798,34 @@ export class LeaveService {
       const e = e0 > endLastDay ? endLastDay : e0;
       if (e < s) continue;
 
-      // Iterate months spanned by [s,e]
+      // Calculate total days for this leave request
+      const totalDays = Math.floor((e.getTime() - s.getTime()) / dayMs) + 1;
+      
+      // Determine how much should be paid vs LWP based on balance
+      let paidDays = 0;
+      let lwpDays = 0;
+      
+      if (isLwpType) {
+        // Explicitly LWP type - all days are LWP
+        lwpDays = totalDays;
+      } else {
+        // Check if employee has sufficient balance for this leave type
+        const typeBalance = currentBalance[type];
+        const availableBalance = typeBalance ? typeBalance.remaining : 0;
+        const annualBalance = currentBalance['annual'] ? currentBalance['annual'].remaining : 0;
+        const totalAvailable = availableBalance + annualBalance;
+        
+        if (totalDays <= totalAvailable) {
+          // Sufficient balance - all paid
+          paidDays = totalDays;
+        } else {
+          // Insufficient balance - partial paid, remainder LWP
+          paidDays = Math.max(0, totalAvailable);
+          lwpDays = totalDays - paidDays;
+        }
+      }
+
+      // Iterate months spanned by [s,e] and distribute days proportionally
       let mCursor = new Date(s.getFullYear(), s.getMonth(), 1);
       const mEnd = new Date(e.getFullYear(), e.getMonth(), 1);
       while (mCursor <= mEnd) {
@@ -799,12 +835,14 @@ export class LeaveService {
         const segStart = s > monthStart ? s : monthStart;
         const segEnd = e < monthEnd ? e : monthEnd;
         if (segEnd >= segStart) {
-          const days = Math.floor((segEnd.getTime() - segStart.getTime()) / dayMs) + 1;
-          if (isLwp) {
-            lwp[key] = (lwp[key] || 0) + days;
-          } else {
-            deducted[key] = (deducted[key] || 0) + days;
-          }
+          const segDays = Math.floor((segEnd.getTime() - segStart.getTime()) / dayMs) + 1;
+          const segRatio = segDays / totalDays;
+          
+          const segPaidDays = Math.round(paidDays * segRatio);
+          const segLwpDays = Math.round(lwpDays * segRatio);
+          
+          deducted[key] = (deducted[key] || 0) + segPaidDays;
+          lwp[key] = (lwp[key] || 0) + segLwpDays;
         }
         mCursor = addMonths(mCursor, 1);
       }
