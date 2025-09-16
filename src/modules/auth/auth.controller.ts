@@ -5,6 +5,13 @@ import { LoginDto } from './dto/login.dto';
 import { LocalAuthGuard } from './guards/local-auth.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
+type AuthUser = {
+  id: string;
+  email: string;
+  role: 'admin' | 'hr' | 'employee' | 'finance';
+  employeeId: string;
+};
+
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
@@ -13,7 +20,7 @@ export class AuthController {
   @Post('login')
   @ApiOperation({ summary: 'Login with email and password' })
   @UseGuards(LocalAuthGuard)
-  async login(@Body() _dto: LoginDto, @Req() req: any) {
+  async login(@Body() _dto: LoginDto, @Req() req: { user: AuthUser }) {
     // LocalAuthGuard puts user on req.user
     return this.authService.issueToken(req.user);
   }
@@ -22,7 +29,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Get current authenticated user' })
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
-  me(@Req() req: any) {
+  me(@Req() req: { user: AuthUser }) {
     return req.user;
   }
 }

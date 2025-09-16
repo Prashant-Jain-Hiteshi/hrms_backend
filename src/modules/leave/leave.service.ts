@@ -1,6 +1,17 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
-import { LeaveRequest, LeaveApprover, LeaveCc, LeaveStatusHistory } from './leave.model';
+import {
+  LeaveRequest,
+  LeaveApprover,
+  LeaveCc,
+  LeaveStatusHistory,
+} from './leave.model';
 import { Employee } from '../employees/employees.model';
 import { CreateLeaveDto, UpdateLeaveStatusDto } from './dto/create-leave.dto';
 import { Op } from 'sequelize';
@@ -24,11 +35,13 @@ export class LeaveService {
   async createLeaveRequest(employeeId: string, createLeaveDto: CreateLeaveDto) {
     const { toEmployees, ccEmployees, ...leaveData } = createLeaveDto;
     this.logger.log(
-      `POST /leave requested by employeeId=${employeeId} | payload=${JSON.stringify({
-        ...leaveData,
-        toCount: toEmployees?.length || 0,
-        ccCount: ccEmployees?.length || 0,
-      })}`
+      `POST /leave requested by employeeId=${employeeId} | payload=${JSON.stringify(
+        {
+          ...leaveData,
+          toCount: toEmployees?.length || 0,
+          ccCount: ccEmployees?.length || 0,
+        },
+      )}`,
     );
 
     try {
@@ -38,10 +51,11 @@ export class LeaveService {
       });
 
       if (toEmployeesExist.length !== toEmployees.length) {
-        this.logger.warn('Validation failed: One or more TO employees not found');
+        this.logger.warn(
+          'Validation failed: One or more TO employees not found',
+        );
         throw new BadRequestException('One or more TO employees not found');
       }
-
 
       // Validate CC employees exist (if provided)
       if (ccEmployees && ccEmployees.length > 0) {
@@ -50,7 +64,9 @@ export class LeaveService {
         });
 
         if (ccEmployeesExist.length !== ccEmployees.length) {
-          this.logger.warn('Validation failed: One or more CC employees not found');
+          this.logger.warn(
+            'Validation failed: One or more CC employees not found',
+          );
           throw new BadRequestException('One or more CC employees not found');
         }
       }
@@ -68,7 +84,7 @@ export class LeaveService {
           leaveRequestId: leaveRequest.id,
           employeeId: empId,
           status: 'pending',
-        })
+        }),
       );
 
       // Create CC entries
@@ -78,7 +94,7 @@ export class LeaveService {
             leaveRequestId: leaveRequest.id,
             employeeId: empId,
             isRead: false,
-          })
+          }),
         ) || [];
 
       // Create initial status history
@@ -90,21 +106,28 @@ export class LeaveService {
         comments: 'Leave request submitted',
       });
 
-      await Promise.all([...approverPromises, ...ccPromises, statusHistoryPromise]);
+      await Promise.all([
+        ...approverPromises,
+        ...ccPromises,
+        statusHistoryPromise,
+      ]);
 
-      this.logger.log(`Leave request created successfully id=${leaveRequest.id}`);
-      return this.getLeaveRequestById(leaveRequest.id);
-    } catch (error) {
-      this.logger.error(
-        `Error creating leave request for employeeId=${employeeId}: ${error?.message}`,
-        error?.stack
+      this.logger.log(
+        `Leave request created successfully id=${leaveRequest.id}`,
       );
-      throw error;
+      return this.getLeaveRequestById(leaveRequest.id);
+    } catch (err: unknown) {
+      const e = err as Error;
+      this.logger.error(
+        `Error creating leave request for employeeId=${employeeId}: ${e.message}`,
+        e.stack,
+      );
+      throw err;
     }
   }
 
   async getLeaveRequests(employeeId: string, userRole: string) {
-    let whereClause: any = {};
+    let whereClause: Record<string, unknown> = {};
 
     if (userRole === 'employee') {
       // Employee can only see their own requests
@@ -120,31 +143,35 @@ export class LeaveService {
         {
           model: Employee,
           as: 'employee',
-          attributes: ['id', 'name', 'email', 'employeeId']
+          attributes: ['id', 'name', 'email', 'employeeId'],
         },
         {
           model: Employee,
           as: 'approver',
-          attributes: ['id', 'name', 'email', 'employeeId']
+          attributes: ['id', 'name', 'email', 'employeeId'],
         },
         {
           model: LeaveApprover,
           as: 'toEmployees',
-          include: [{
-            model: Employee,
-            attributes: ['id', 'name', 'email', 'employeeId']
-          }]
+          include: [
+            {
+              model: Employee,
+              attributes: ['id', 'name', 'email', 'employeeId'],
+            },
+          ],
         },
         {
           model: LeaveCc,
           as: 'ccEmployees',
-          include: [{
-            model: Employee,
-            attributes: ['id', 'name', 'email', 'employeeId']
-          }]
-        }
+          include: [
+            {
+              model: Employee,
+              attributes: ['id', 'name', 'email', 'employeeId'],
+            },
+          ],
+        },
       ],
-      order: [['createdAt', 'DESC']]
+      order: [['createdAt', 'DESC']],
     });
   }
 
@@ -158,71 +185,84 @@ export class LeaveService {
             {
               model: Employee,
               as: 'employee',
-              attributes: ['id', 'name', 'email', 'employeeId']
+              attributes: ['id', 'name', 'email', 'employeeId'],
             },
             {
               model: LeaveApprover,
               as: 'toEmployees',
               where: { employeeId },
-              include: [{
-                model: Employee,
-                attributes: ['id', 'name', 'email', 'employeeId']
-              }]
+              include: [
+                {
+                  model: Employee,
+                  attributes: ['id', 'name', 'email', 'employeeId'],
+                },
+              ],
             },
             {
               model: LeaveCc,
               as: 'ccEmployees',
-              include: [{
-                model: Employee,
-                attributes: ['id', 'name', 'email', 'employeeId']
-              }]
-            }
+              include: [
+                {
+                  model: Employee,
+                  attributes: ['id', 'name', 'email', 'employeeId'],
+                },
+              ],
+            },
           ],
-          order: [['createdAt', 'DESC']]
+          order: [['createdAt', 'DESC']],
         }),
         this.leaveRequestModel.findAll({
           include: [
             {
               model: Employee,
               as: 'employee',
-              attributes: ['id', 'name', 'email', 'employeeId']
+              attributes: ['id', 'name', 'email', 'employeeId'],
             },
             {
               model: LeaveApprover,
               as: 'toEmployees',
-              include: [{
-                model: Employee,
-                attributes: ['id', 'name', 'email', 'employeeId']
-              }]
+              include: [
+                {
+                  model: Employee,
+                  attributes: ['id', 'name', 'email', 'employeeId'],
+                },
+              ],
             },
             {
               model: LeaveCc,
               as: 'ccEmployees',
               where: { employeeId },
-              include: [{
-                model: Employee,
-                attributes: ['id', 'name', 'email', 'employeeId']
-              }]
-            }
+              include: [
+                {
+                  model: Employee,
+                  attributes: ['id', 'name', 'email', 'employeeId'],
+                },
+              ],
+            },
           ],
-          order: [['createdAt', 'DESC']]
-        })
+          order: [['createdAt', 'DESC']],
+        }),
       ]);
 
-      const map = new Map<string, any>();
+      const map = new Map<string, LeaveRequest>();
       for (const lr of [...asApprover, ...asCc]) {
-        if (lr?.id) map.set(lr.id, lr);
+        const id = lr.id;
+        if (id) map.set(id, lr);
       }
       const merged = Array.from(map.values());
-      merged.sort((a: any, b: any) => {
-        const ad = a?.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const bd = b?.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return bd - ad;
-      });
+      const getCreatedAtTime = (x: LeaveRequest): number => {
+        // Sequelize instance may have get('createdAt') or plain field
+        const val = (x as any)?.get?.('createdAt') ?? (x as any)?.createdAt;
+        if (!val) return 0;
+        const date = typeof val === 'string' ? new Date(val) : (val as Date);
+        return isNaN(date.getTime()) ? 0 : date.getTime();
+      };
+      merged.sort((a, b) => getCreatedAtTime(b) - getCreatedAtTime(a));
       return merged;
-    } catch (error) {
-      this.logger.error(`GET /leave/mentions failed: ${error?.message}`, error?.stack);
-      throw error;
+    } catch (err: unknown) {
+      const e = err as Error;
+      this.logger.error(`GET /leave/mentions failed: ${e.message}`, e.stack);
+      throw err;
     }
   }
 
@@ -233,28 +273,32 @@ export class LeaveService {
         {
           model: Employee,
           as: 'employee',
-          attributes: ['id', 'name', 'email', 'employeeId']
+          attributes: ['id', 'name', 'email', 'employeeId'],
         },
         {
           model: LeaveApprover,
           as: 'toEmployees',
           where: { employeeId: approverId, status: 'pending' },
-          include: [{
-            model: Employee,
-            attributes: ['id', 'name', 'email', 'employeeId']
-          }]
+          include: [
+            {
+              model: Employee,
+              attributes: ['id', 'name', 'email', 'employeeId'],
+            },
+          ],
         },
         {
           model: LeaveCc,
           as: 'ccEmployees',
-          include: [{
-            model: Employee,
-            attributes: ['id', 'name', 'email', 'employeeId']
-          }]
-        }
+          include: [
+            {
+              model: Employee,
+              attributes: ['id', 'name', 'email', 'employeeId'],
+            },
+          ],
+        },
       ],
       where: { status: 'pending' },
-      order: [['createdAt', 'DESC']]
+      order: [['createdAt', 'DESC']],
     });
   }
 
@@ -265,27 +309,31 @@ export class LeaveService {
         {
           model: Employee,
           as: 'employee',
-          attributes: ['id', 'name', 'email', 'employeeId']
+          attributes: ['id', 'name', 'email', 'employeeId'],
         },
         {
           model: LeaveApprover,
           as: 'toEmployees',
-          include: [{
-            model: Employee,
-            attributes: ['id', 'name', 'email', 'employeeId']
-          }]
+          include: [
+            {
+              model: Employee,
+              attributes: ['id', 'name', 'email', 'employeeId'],
+            },
+          ],
         },
         {
           model: LeaveCc,
           as: 'ccEmployees',
           where: { employeeId: ccEmployeeId },
-          include: [{
-            model: Employee,
-            attributes: ['id', 'name', 'email', 'employeeId']
-          }]
-        }
+          include: [
+            {
+              model: Employee,
+              attributes: ['id', 'name', 'email', 'employeeId'],
+            },
+          ],
+        },
       ],
-      order: [['createdAt', 'DESC']]
+      order: [['createdAt', 'DESC']],
     });
   }
 
@@ -295,40 +343,46 @@ export class LeaveService {
         {
           model: Employee,
           as: 'employee',
-          attributes: ['id', 'name', 'email', 'employeeId']
+          attributes: ['id', 'name', 'email', 'employeeId'],
         },
         {
           model: Employee,
           as: 'approver',
-          attributes: ['id', 'name', 'email', 'employeeId']
+          attributes: ['id', 'name', 'email', 'employeeId'],
         },
         {
           model: LeaveApprover,
           as: 'toEmployees',
-          include: [{
-            model: Employee,
-            attributes: ['id', 'name', 'email', 'employeeId']
-          }]
+          include: [
+            {
+              model: Employee,
+              attributes: ['id', 'name', 'email', 'employeeId'],
+            },
+          ],
         },
         {
           model: LeaveCc,
           as: 'ccEmployees',
-          include: [{
-            model: Employee,
-            attributes: ['id', 'name', 'email', 'employeeId']
-          }]
+          include: [
+            {
+              model: Employee,
+              attributes: ['id', 'name', 'email', 'employeeId'],
+            },
+          ],
         },
         {
           model: LeaveStatusHistory,
           as: 'statusHistory',
-          include: [{
-            model: Employee,
-            as: 'changedByEmployee',
-            attributes: ['id', 'name', 'email', 'employeeId']
-          }],
-          order: [['changedAt', 'DESC']]
-        }
-      ]
+          include: [
+            {
+              model: Employee,
+              as: 'changedByEmployee',
+              attributes: ['id', 'name', 'email', 'employeeId'],
+            },
+          ],
+          order: [['changedAt', 'DESC']],
+        },
+      ],
     });
 
     if (!leaveRequest) {
@@ -341,7 +395,7 @@ export class LeaveService {
   async updateLeaveStatus(
     leaveRequestId: string,
     approverId: string,
-    updateStatusDto: UpdateLeaveStatusDto
+    updateStatusDto: UpdateLeaveStatusDto,
   ) {
     const leaveRequest = await this.getLeaveRequestById(leaveRequestId);
 
@@ -350,12 +404,14 @@ export class LeaveService {
       where: {
         leaveRequestId,
         employeeId: approverId,
-        status: 'pending'
-      }
+        status: 'pending',
+      },
     });
 
     if (!approver) {
-      throw new ForbiddenException('You are not authorized to approve this leave request');
+      throw new ForbiddenException(
+        'You are not authorized to approve this leave request',
+      );
     }
 
     // Update leave request status
@@ -363,14 +419,14 @@ export class LeaveService {
       status: updateStatusDto.status,
       approvedBy: approverId,
       approvedAt: new Date(),
-      comments: updateStatusDto.comments
+      comments: updateStatusDto.comments,
     });
 
     // Update approver status
     await approver.update({
       status: updateStatusDto.status,
       comments: updateStatusDto.comments,
-      actionAt: new Date()
+      actionAt: new Date(),
     });
 
     // Create status history entry
@@ -379,7 +435,7 @@ export class LeaveService {
       status: updateStatusDto.status,
       changedBy: approverId,
       changedAt: new Date(),
-      comments: updateStatusDto.comments || `Leave ${updateStatusDto.status}`
+      comments: updateStatusDto.comments || `Leave ${updateStatusDto.status}`,
     });
 
     return this.getLeaveRequestById(leaveRequestId);
@@ -389,8 +445,8 @@ export class LeaveService {
     const ccEntry = await this.leaveCcModel.findOne({
       where: {
         leaveRequestId,
-        employeeId: ccEmployeeId
-      }
+        employeeId: ccEmployeeId,
+      },
     });
 
     if (!ccEntry) {
@@ -399,7 +455,7 @@ export class LeaveService {
 
     await ccEntry.update({
       isRead: true,
-      readAt: new Date()
+      readAt: new Date(),
     });
 
     return { message: 'Marked as read' };
@@ -410,7 +466,9 @@ export class LeaveService {
 
     // Only employee who created the request or admin can delete
     if (userRole !== 'admin' && leaveRequest.employeeId !== employeeId) {
-      throw new ForbiddenException('You can only delete your own leave requests');
+      throw new ForbiddenException(
+        'You can only delete your own leave requests',
+      );
     }
 
     // Can only delete pending requests
@@ -422,7 +480,7 @@ export class LeaveService {
     await Promise.all([
       this.leaveApproverModel.destroy({ where: { leaveRequestId: id } }),
       this.leaveCcModel.destroy({ where: { leaveRequestId: id } }),
-      this.leaveStatusHistoryModel.destroy({ where: { leaveRequestId: id } })
+      this.leaveStatusHistoryModel.destroy({ where: { leaveRequestId: id } }),
     ]);
 
     // Delete leave request
@@ -436,7 +494,9 @@ export class LeaveService {
 
     // Only the employee who created the request can cancel
     if (leaveRequest.employeeId !== employeeId) {
-      throw new ForbiddenException('You can only cancel your own leave requests');
+      throw new ForbiddenException(
+        'You can only cancel your own leave requests',
+      );
     }
 
     // Can only cancel pending requests
@@ -472,27 +532,32 @@ export class LeaveService {
       { name: 'Casual Leave', numberOfLeaves: 5 },
       { name: 'Maternity Leave', numberOfLeaves: 90 },
       { name: 'Paternity Leave', numberOfLeaves: 15 },
-      { name: 'Emergency Leave', numberOfLeaves: 3 }
+      { name: 'Emergency Leave', numberOfLeaves: 3 },
     ];
 
     // Get approved leave requests for this employee
     const approvedLeaves = await this.leaveRequestModel.findAll({
       where: {
         employeeId,
-        status: 'approved'
+        status: 'approved',
       },
-      attributes: ['leaveType', 'startDate', 'endDate']
+      attributes: ['leaveType', 'startDate', 'endDate'],
     });
 
     // Calculate used days per leave type
-    const balance: Record<string, any> = {};
-    
-    leaveTypes.forEach(leaveType => {
+    const balance: Record<
+      string,
+      { total: number; used: number; remaining: number; displayName: string }
+    > = {};
+
+    leaveTypes.forEach((leaveType) => {
       const typeName = leaveType.name.toLowerCase().replace(/\s+/g, '');
-      const typeLeaves = approvedLeaves.filter(leave => {
+      const typeLeaves = approvedLeaves.filter((leave) => {
         const leaveTypeName = leave.leaveType.toLowerCase().replace(/\s+/g, '');
-        return leaveTypeName === typeName || 
-               leaveTypeName === leaveType.name.toLowerCase().replace(' leave', '');
+        return (
+          leaveTypeName === typeName ||
+          leaveTypeName === leaveType.name.toLowerCase().replace(' leave', '')
+        );
       });
 
       const usedDays = typeLeaves.reduce((total, leave) => {
@@ -508,7 +573,7 @@ export class LeaveService {
         total: leaveType.numberOfLeaves,
         used: usedDays,
         remaining: Math.max(0, leaveType.numberOfLeaves - usedDays),
-        displayName: leaveType.name
+        displayName: leaveType.name,
       };
     });
 
@@ -516,24 +581,30 @@ export class LeaveService {
   }
 
   async getLeaveStatistics(employeeId?: string) {
-    let whereClause: any = {};
-    
+    const whereClause: Record<string, unknown> = {};
+
     if (employeeId) {
       whereClause.employeeId = employeeId;
     }
 
     const [total, pending, approved, rejected] = await Promise.all([
       this.leaveRequestModel.count({ where: whereClause }),
-      this.leaveRequestModel.count({ where: { ...whereClause, status: 'pending' } }),
-      this.leaveRequestModel.count({ where: { ...whereClause, status: 'approved' } }),
-      this.leaveRequestModel.count({ where: { ...whereClause, status: 'rejected' } })
+      this.leaveRequestModel.count({
+        where: { ...whereClause, status: 'pending' },
+      }),
+      this.leaveRequestModel.count({
+        where: { ...whereClause, status: 'approved' },
+      }),
+      this.leaveRequestModel.count({
+        where: { ...whereClause, status: 'rejected' },
+      }),
     ]);
 
     return {
       total,
       pending,
       approved,
-      rejected
+      rejected,
     };
   }
 }

@@ -1,11 +1,18 @@
-import { Table, Column, Model, DataType, ForeignKey, BelongsTo, Default } from 'sequelize-typescript';
+import {
+  Table,
+  Column,
+  Model,
+  DataType,
+  ForeignKey,
+  BelongsTo,
+} from 'sequelize-typescript';
 import { Employee } from '../employees/employees.model';
 
 export enum PayrollStatus {
   PENDING = 'PENDING',
   PROCESSED = 'PROCESSED',
   PAID = 'PAID',
-  CANCELLED = 'CANCELLED'
+  CANCELLED = 'CANCELLED',
 }
 
 @Table({ tableName: 'payrolls', timestamps: true })
@@ -44,7 +51,7 @@ export class Payroll extends Model {
 
   @Column({
     type: DataType.ENUM(...Object.values(PayrollStatus)),
-    defaultValue: PayrollStatus.PENDING
+    defaultValue: PayrollStatus.PENDING,
   })
   status: PayrollStatus;
 

@@ -19,7 +19,8 @@ import { PayrollModule } from './modules/payroll/payroll.module';
     SequelizeModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
-        const logging = config.get('DB_LOGGING') === 'true' ? console.log : false;
+        const logging =
+          config.get('DB_LOGGING') === 'true' ? console.log : false;
         const ssl = config.get('DB_SSL') === 'true';
         const dialectOptions = ssl
           ? { ssl: { require: true, rejectUnauthorized: false } }

@@ -28,7 +28,9 @@ export class AuthService {
     // Resolve Employee UUID by matching email
     let employeeId: string | undefined = undefined;
     try {
-      const employee = await this.employeeModel.findOne({ where: { email: user.email } });
+      const employee = await this.employeeModel.findOne({
+        where: { email: user.email },
+      });
       employeeId = employee?.id;
     } catch {}
 
@@ -41,6 +43,6 @@ export class AuthService {
       await user.update({ lastLoginAt: new Date(), isFirstLogin: false });
     } catch {}
 
-    return { access_token, user: { ...user.toJSON?.() ?? user, employeeId } };
+    return { access_token, user: { ...(user.toJSON?.() ?? user), employeeId } };
   }
 }

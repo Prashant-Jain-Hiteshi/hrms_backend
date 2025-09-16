@@ -1,13 +1,27 @@
-import { IsString, IsNumber, IsBoolean, IsOptional, IsEnum, Min, MaxLength } from 'class-validator';
+import {
+  IsString,
+  IsNumber,
+  IsBoolean,
+  IsOptional,
+  IsEnum,
+  Min,
+  MaxLength,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateLeaveTypeDto {
-  @ApiProperty({ description: 'Name of the leave type', example: 'Annual Leave' })
+  @ApiProperty({
+    description: 'Name of the leave type',
+    example: 'Annual Leave',
+  })
   @IsString()
   @MaxLength(100)
   name: string;
 
-  @ApiProperty({ description: 'Number of leaves allowed per year', example: 20 })
+  @ApiProperty({
+    description: 'Number of leaves allowed per year',
+    example: 20,
+  })
   @IsNumber()
   @Min(0)
   numberOfLeaves: number;
@@ -18,25 +32,34 @@ export class CreateLeaveTypeDto {
   @MaxLength(500)
   description?: string;
 
-  @ApiPropertyOptional({ description: 'Whether approval is required', default: true })
+  @ApiPropertyOptional({
+    description: 'Whether approval is required',
+    default: true,
+  })
   @IsOptional()
   @IsBoolean()
   requiresApproval?: boolean;
 
-  @ApiPropertyOptional({ description: 'Whether carry forward is allowed', default: false })
+  @ApiPropertyOptional({
+    description: 'Whether carry forward is allowed',
+    default: false,
+  })
   @IsOptional()
   @IsBoolean()
   carryForward?: boolean;
 
-  @ApiPropertyOptional({ description: 'Whether encashment is allowed', default: false })
+  @ApiPropertyOptional({
+    description: 'Whether encashment is allowed',
+    default: false,
+  })
   @IsOptional()
   @IsBoolean()
   encashment?: boolean;
 
-  @ApiPropertyOptional({ 
-    description: 'Employee eligibility', 
+  @ApiPropertyOptional({
+    description: 'Employee eligibility',
     enum: ['all', 'permanent', 'contract', 'senior'],
-    default: 'all'
+    default: 'all',
   })
   @IsOptional()
   @IsEnum(['all', 'permanent', 'contract', 'senior'])
@@ -77,9 +100,9 @@ export class UpdateLeaveTypeDto {
   @IsBoolean()
   encashment?: boolean;
 
-  @ApiPropertyOptional({ 
-    description: 'Employee eligibility', 
-    enum: ['all', 'permanent', 'contract', 'senior']
+  @ApiPropertyOptional({
+    description: 'Employee eligibility',
+    enum: ['all', 'permanent', 'contract', 'senior'],
   })
   @IsOptional()
   @IsEnum(['all', 'permanent', 'contract', 'senior'])

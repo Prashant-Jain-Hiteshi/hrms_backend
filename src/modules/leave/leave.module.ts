@@ -4,7 +4,12 @@ import { LeaveController } from './leave.controller';
 import { LeaveService } from './leave.service';
 import { LeaveTypeController } from './leave-type.controller';
 import { LeaveTypeService } from './leave-type.service';
-import { LeaveRequest, LeaveApprover, LeaveCc, LeaveStatusHistory } from './leave.model';
+import {
+  LeaveRequest,
+  LeaveApprover,
+  LeaveCc,
+  LeaveStatusHistory,
+} from './leave.model';
 import { LeaveType } from './leave-type.model';
 import { Employee } from '../employees/employees.model';
 

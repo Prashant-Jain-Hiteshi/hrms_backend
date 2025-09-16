@@ -13,7 +13,13 @@ import {
   HttpCode,
   ParseIntPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -32,17 +38,34 @@ export class LeaveTypeController {
   @ApiOperation({ summary: 'Create a new leave type (Admin only)' })
   @ApiResponse({ status: 201, description: 'Leave type created successfully' })
   @ApiResponse({ status: 400, description: 'Bad request - validation failed' })
-  @ApiResponse({ status: 409, description: 'Conflict - leave type name already exists' })
-  @ApiResponse({ status: 403, description: 'Forbidden - Admin access required' })
+  @ApiResponse({
+    status: 409,
+    description: 'Conflict - leave type name already exists',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - Admin access required',
+  })
   async createLeaveType(@Body() createLeaveTypeDto: CreateLeaveTypeDto) {
     return this.leaveTypeService.createLeaveType(createLeaveTypeDto);
   }
 
   @Get()
   @ApiOperation({ summary: 'Get all active leave types' })
-  @ApiResponse({ status: 200, description: 'Leave types retrieved successfully' })
-  @ApiQuery({ name: 'search', required: false, description: 'Search term for filtering leave types' })
-  @ApiQuery({ name: 'eligibility', required: false, description: 'Filter by eligibility type' })
+  @ApiResponse({
+    status: 200,
+    description: 'Leave types retrieved successfully',
+  })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    description: 'Search term for filtering leave types',
+  })
+  @ApiQuery({
+    name: 'eligibility',
+    required: false,
+    description: 'Filter by eligibility type',
+  })
   async getAllLeaveTypes(
     @Query('search') search?: string,
     @Query('eligibility') eligibility?: string,
@@ -50,7 +73,7 @@ export class LeaveTypeController {
     if (search) {
       return this.leaveTypeService.searchLeaveTypes(search);
     }
-    
+
     if (eligibility) {
       return this.leaveTypeService.getLeaveTypesByEligibility(eligibility);
     }
@@ -60,7 +83,10 @@ export class LeaveTypeController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get leave type by ID' })
-  @ApiResponse({ status: 200, description: 'Leave type retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Leave type retrieved successfully',
+  })
   @ApiResponse({ status: 404, description: 'Leave type not found' })
   async getLeaveTypeById(@Param('id', ParseIntPipe) id: number) {
     return this.leaveTypeService.getLeaveTypeById(id);
@@ -72,8 +98,14 @@ export class LeaveTypeController {
   @ApiResponse({ status: 200, description: 'Leave type updated successfully' })
   @ApiResponse({ status: 400, description: 'Bad request - validation failed' })
   @ApiResponse({ status: 404, description: 'Leave type not found' })
-  @ApiResponse({ status: 409, description: 'Conflict - leave type name already exists' })
-  @ApiResponse({ status: 403, description: 'Forbidden - Admin access required' })
+  @ApiResponse({
+    status: 409,
+    description: 'Conflict - leave type name already exists',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - Admin access required',
+  })
   async updateLeaveType(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateLeaveTypeDto: UpdateLeaveTypeDto,
@@ -86,7 +118,10 @@ export class LeaveTypeController {
   @ApiOperation({ summary: 'Delete leave type (Admin only)' })
   @ApiResponse({ status: 200, description: 'Leave type deleted successfully' })
   @ApiResponse({ status: 404, description: 'Leave type not found' })
-  @ApiResponse({ status: 403, description: 'Forbidden - Admin access required' })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - Admin access required',
+  })
   @HttpCode(HttpStatus.OK)
   async deleteLeaveType(@Param('id', ParseIntPipe) id: number) {
     return this.leaveTypeService.deleteLeaveType(id);
@@ -95,9 +130,15 @@ export class LeaveTypeController {
   @Put(':id/toggle-status')
   @Roles('admin')
   @ApiOperation({ summary: 'Toggle leave type active status (Admin only)' })
-  @ApiResponse({ status: 200, description: 'Leave type status toggled successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Leave type status toggled successfully',
+  })
   @ApiResponse({ status: 404, description: 'Leave type not found' })
-  @ApiResponse({ status: 403, description: 'Forbidden - Admin access required' })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - Admin access required',
+  })
   async toggleLeaveTypeStatus(@Param('id', ParseIntPipe) id: number) {
     return this.leaveTypeService.toggleLeaveTypeStatus(id);
   }
