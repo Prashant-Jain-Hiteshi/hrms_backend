@@ -1,17 +1,13 @@
 import { InjectModel } from '@nestjs/sequelize';
-import {
-  Injectable,
-  BadRequestException,
-  NotFoundException,
-} from '@nestjs/common';
-
-import { AddEmployeeAttendanceDto } from './dto/add-employee-attendance.dto';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { Op } from 'sequelize';
 import { Attendance } from './attendance.model';
 import { AttendanceSession } from './attendance-session.model';
+import { User } from '../users/users.model';
+import { Employee } from '../employees/employees.model';
+import { AddEmployeeAttendanceDto } from './dto/add-employee-attendance.dto';
 import { CheckInDto } from './dto/check-in.dto';
 import { CheckOutDto } from './dto/check-out.dto';
-import { Employee } from '../employees/employees.model';
 
 function toDateOnly(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -132,15 +128,36 @@ export class AttendanceService {
     return record;
   }
 
-  async myAttendance(user: { id: string }, from?: string, to?: string) {
-    const where: any = { userId: user.id };
-    if (from && to) where.date = { [Op.between]: [from, to] };
-    else if (from) where.date = { [Op.gte]: from };
-    else if (to) where.date = { [Op.lte]: to };
+  async myAttendance(user: { id: string; email?: string }, from?: string, to?: string) {
+    // First, find the employee record for this user
+    const employee = await this.employeeModel.findOne({
+      where: { email: user.email }
+    });
+
+    // Build date filter
+    const dateFilter: any = {};
+    if (from && to) dateFilter.date = { [Op.between]: [from, to] };
+    else if (from) dateFilter.date = { [Op.gte]: from };
+    else if (to) dateFilter.date = { [Op.lte]: to };
+
+    // Build where clause to include both self-created and HR/Admin-created records
+    const where: any = {
+      [Op.or]: [
+        { userId: user.id, ...dateFilter },
+        ...(employee ? [{ employeeId: employee.id, ...dateFilter }] : [])
+      ]
+    };
 
     const rows = await this.attendanceModel.findAll({
       where,
       order: [['date', 'DESC']],
+      include: [
+        {
+          model: this.employeeModel,
+          as: 'employee',
+          attributes: ['id', 'name', 'email'],
+        },
+      ],
     });
     return rows;
   }
@@ -455,23 +472,72 @@ export class AttendanceService {
 
   async status(user: { id: string }, date?: string) {
     const day = date || toDateOnly(new Date());
-    const [record, openSession, sessions] = await Promise.all([
-      this.attendanceModel.findOne({ where: { userId: user.id, date: day } }),
-      this.sessionModel.findOne({
-        where: { userId: user.id, date: day, endTime: { [Op.is]: null } },
-      }),
-      this.sessionModel.findAll({
-        where: { userId: user.id, date: day },
-        order: [['createdAt', 'ASC']],
-      }),
-    ]);
+    
+    // Find the employee record to get employeeId for HR/Admin added attendance
+    const employee = await this.employeeModel.findOne({
+      where: { id: user.id }
+    });
+
+    // Build where clauses to handle both employee self-punched and HR/Admin added attendance
+    const attendanceWhere = {
+      [Op.or]: [
+        { userId: user.id, date: day },
+        ...(employee ? [{ employeeId: employee.id, date: day }] : [])
+      ]
+    };
+
+    // Find the attendance record first
+    const record = await this.attendanceModel.findOne({
+      where: attendanceWhere,
+    });
+
+    let openSession: any = null;
+    let sessions: any[] = [];
+
+    if (record) {
+      // If we found an attendance record, find sessions linked to it
+      const sessionWhere = {
+        [Op.and]: [
+          { date: day },
+          {
+            [Op.or]: [
+              { userId: user.id }, // Employee self-punched sessions
+              { attendanceId: record.id }, // Sessions linked to this attendance record
+              ...(employee ? [{ userId: employee.id }] : []) // HR/Admin added sessions
+            ]
+          }
+        ]
+      };
+
+      [openSession, sessions] = await Promise.all([
+        this.sessionModel.findOne({
+          where: {
+            ...sessionWhere,
+            endTime: { [Op.is]: null }
+          },
+        }),
+        this.sessionModel.findAll({
+          where: sessionWhere,
+          order: [['createdAt', 'ASC']],
+        }),
+      ]);
+    }
+
     const activeSession = !!openSession;
+    
+    // If there's no active session but there are completed sessions or attendance record,
+    // the employee should still be able to check out (for cases where HR/Admin added attendance)
+    const hasAttendanceToday = !!record;
+    const hasCompletedSessions = sessions.length > 0 && sessions.some(s => s.endTime);
+    
     return {
       date: day,
       activeSession,
-      sessionStartTime: openSession?.startTime || null,
+      sessionStartTime: openSession?.startTime || (sessions.length > 0 ? sessions[0].startTime : null),
       attendance: record,
       sessions,
+      hasAttendanceToday, // New field to indicate if employee has attendance for today
+      hasCompletedSessions, // New field to indicate if there are completed sessions
     };
   }
 
@@ -548,18 +614,70 @@ export class AttendanceService {
   async adminStatus(targetUserId: string, date?: string) {
     if (!targetUserId) throw new BadRequestException('userId is required');
     const day = date || toDateOnly(new Date());
-    const [record, openSession, sessions] = await Promise.all([
-      this.attendanceModel.findOne({
-        where: { userId: targetUserId, date: day },
-      }),
-      this.sessionModel.findOne({
-        where: { userId: targetUserId, date: day, endTime: { [Op.is]: null } },
-      }),
-      this.sessionModel.findAll({
-        where: { userId: targetUserId, date: day },
-        order: [['createdAt', 'ASC']],
-      }),
-    ]);
+    
+    console.log(`🔍 DEBUG adminStatus: targetUserId=${targetUserId}, date=${day}`);
+    
+    // First, find the employee record to get employeeId
+    const employee = await this.employeeModel.findOne({
+      where: { id: targetUserId }
+    });
+    
+    console.log(`🔍 DEBUG employee found:`, employee?.id);
+
+    // Build where clauses to handle both employee self-punched and HR/Admin added attendance
+    const attendanceWhere = {
+      [Op.or]: [
+        { userId: targetUserId, date: day },
+        ...(employee ? [{ employeeId: employee.id, date: day }] : [])
+      ]
+    };
+    
+    console.log(`🔍 DEBUG attendanceWhere:`, JSON.stringify(attendanceWhere, null, 2));
+
+    // Find the attendance record first
+    const record = await this.attendanceModel.findOne({
+      where: attendanceWhere,
+    });
+    
+    console.log(`🔍 DEBUG attendance record found:`, record?.id, record?.employeeId, record?.userId);
+
+    let openSession: any = null;
+    let sessions: any[] = [];
+
+    if (record) {
+      // If we found an attendance record, find sessions linked to it
+      // This handles both employee self-punched and HR/Admin added attendance
+      const sessionWhere = {
+        [Op.and]: [
+          { date: day },
+          {
+            [Op.or]: [
+              { userId: targetUserId }, // Employee self-punched sessions
+              { attendanceId: record.id }, // Sessions linked to this attendance record
+              ...(employee ? [{ userId: employee.id }] : []) // HR/Admin added sessions
+            ]
+          }
+        ]
+      };
+      
+      console.log(`🔍 DEBUG sessionWhere:`, JSON.stringify(sessionWhere, null, 2));
+
+      [openSession, sessions] = await Promise.all([
+        this.sessionModel.findOne({
+          where: {
+            ...sessionWhere,
+            endTime: { [Op.is]: null }
+          },
+        }),
+        this.sessionModel.findAll({
+          where: sessionWhere,
+          order: [['createdAt', 'ASC']],
+        }),
+      ]);
+      
+      console.log(`🔍 DEBUG sessions found:`, sessions.length, sessions.map(s => ({ id: s.id, userId: s.userId, attendanceId: s.attendanceId })));
+    }
+    
     const activeSession = !!openSession;
     return {
       date: day,
@@ -1167,6 +1285,34 @@ export class AttendanceService {
       notes: description || `Added by ${user.role.toUpperCase()}: ${user.id}`,
     });
 
+    // Create session record to match the behavior of employee self-punch
+    // This ensures the attendance details popup shows session information
+    // For HR/Admin added attendance, we'll use the employeeId as userId in sessions
+    // The adminStatus method has been updated to handle this case
+    const sessionData: any = {
+      attendanceId: attendanceRecord.id,
+      userId: employeeId, // Use employeeId as userId for HR/Admin added sessions
+      date,
+      startTime: checkIn,
+    };
+
+    // If check-out time is provided, create a completed session
+    if (checkOut) {
+      sessionData.endTime = checkOut;
+      // Calculate session hours
+      const startTime = new Date(`${date}T${checkIn}`);
+      const endTime = new Date(`${date}T${checkOut}`);
+      const diffMs = endTime.getTime() - startTime.getTime();
+      sessionData.hours = Math.max(0, diffMs / (1000 * 60 * 60)); // Convert to hours
+    }
+
+    console.log(`🔍 DEBUG addEmployeeAttendance - Creating session:`, JSON.stringify(sessionData, null, 2));
+
+    // Create the session record
+    const createdSession = await this.sessionModel.create(sessionData);
+    
+    console.log(`🔍 DEBUG addEmployeeAttendance - Session created:`, createdSession.id, createdSession.userId, createdSession.attendanceId);
+
     // Return the created record with employee details
     const recordWithEmployee = await this.attendanceModel.findByPk(
       attendanceRecord.id,
@@ -1174,7 +1320,7 @@ export class AttendanceService {
         include: [
           {
             model: this.employeeModel,
-            as: 'Employee',
+            as: 'employee',
             attributes: ['id', 'name', 'email'],
           },
         ],
@@ -1189,6 +1335,71 @@ export class AttendanceService {
     } catch (error) {
       console.error('🚨 ERROR in addEmployeeAttendance:', error);
       console.error('🚨 ERROR Stack:', error.stack);
+      throw error;
+    }
+  }
+
+  async getAttendanceForDate(user: { id: string; email: string; role: string }, date: string) {
+    try {
+      // First, find the employee record for this user
+      const employee = await this.employeeModel.findOne({
+        where: { email: user.email }
+      });
+
+      if (!employee) {
+        return {
+          success: false,
+          message: 'Employee record not found',
+        };
+      }
+
+      // Find attendance record for the user on the specified date
+      // Check both userId (for self-created records) and employeeId (for HR/Admin-created records)
+      const attendanceRecord = await this.attendanceModel.findOne({
+        where: {
+          [Op.or]: [
+            { userId: user.id, date: date },
+            { employeeId: employee.id, date: date }
+          ]
+        },
+        include: [
+          {
+            model: this.employeeModel,
+            as: 'employee',
+            attributes: ['id', 'name', 'email'],
+          },
+        ],
+      });
+
+      if (attendanceRecord) {
+        // User was present - return punch in/out details
+        return {
+          success: true,
+          status: 'present',
+          data: {
+            date: attendanceRecord.date,
+            checkIn: attendanceRecord.checkIn,
+            checkOut: attendanceRecord.checkOut,
+            status: attendanceRecord.status,
+            hoursWorked: attendanceRecord.hoursWorked,
+          },
+          message: `Attendance details for ${date}`,
+        };
+      } else {
+        // No attendance record found - user was absent
+        // Check if there's a leave record for this date (optional enhancement)
+        return {
+          success: true,
+          status: 'absent',
+          data: {
+            date: date,
+            message: 'On Leave / Absent',
+          },
+          message: `No attendance record found for ${date}`,
+        };
+      }
+    } catch (error) {
+      console.error('🚨 ERROR in getAttendanceForDate:', error);
       throw error;
     }
   }
