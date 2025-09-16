@@ -1174,7 +1174,7 @@ export class AttendanceService {
         include: [
           {
             model: this.employeeModel,
-            as: 'Employee',
+            as: 'employee',
             attributes: ['id', 'name', 'email'],
           },
         ],
