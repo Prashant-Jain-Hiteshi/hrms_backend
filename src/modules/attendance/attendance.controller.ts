@@ -65,7 +65,7 @@ export class AttendanceController {
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {
-    const user = req.user as { id: string };
+    const user = req.user as { id: string; email: string };
     return this.attendanceService.myAttendance(user, from, to);
   }
 
@@ -345,6 +345,16 @@ export class AttendanceController {
   ) {
     const user = req.user as { id: string; role: string };
     return this.attendanceService.addEmployeeAttendance(attendanceData, user);
+  }
+
+  @Get('date-details')
+  @ApiOperation({ summary: 'Get attendance details for a specific date' })
+  async getAttendanceForDate(
+    @Req() req: any,
+    @Query('date') date: string,
+  ) {
+    const user = req.user as { id: string; email: string; role: string };
+    return this.attendanceService.getAttendanceForDate(user, date);
   }
 
 
