@@ -19,7 +19,9 @@ export class UsersService {
 
   async create(dto: CreateUserDto): Promise<User> {
     // Check for duplicate email
-    const existing = await this.userModel.findOne({ where: { email: dto.email } });
+    const existing = await this.userModel.findOne({
+      where: { email: dto.email },
+    });
     if (existing) {
       throw new ConflictException('Email already exists');
     }
@@ -39,8 +41,15 @@ export class UsersService {
     }
   }
 
-  async findAll(limit = 25, offset = 0): Promise<{ rows: User[]; count: number }> {
-    return this.userModel.findAndCountAll({ limit, offset, order: [['createdAt', 'DESC']] });
+  async findAll(
+    limit = 25,
+    offset = 0,
+  ): Promise<{ rows: User[]; count: number }> {
+    return this.userModel.findAndCountAll({
+      limit,
+      offset,
+      order: [['createdAt', 'DESC']],
+    });
   }
 
   async findOne(id: string): Promise<User> {
@@ -57,7 +66,9 @@ export class UsersService {
     const user = await this.findOne(id);
     // If email is being updated, ensure uniqueness
     if (dto.email && dto.email !== user.email) {
-      const exists = await this.userModel.findOne({ where: { email: dto.email } });
+      const exists = await this.userModel.findOne({
+        where: { email: dto.email },
+      });
       if (exists) throw new ConflictException('Email already exists');
     }
     if (dto.password) {

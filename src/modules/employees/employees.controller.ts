@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Put,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { EmployeesService } from './employees.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
@@ -29,7 +40,10 @@ export class EmployeesController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.HR, Role.FINANCE, Role.EMPLOYEE)
   findAll(@Query('limit') limit?: string, @Query('offset') offset?: string) {
-    return this.employeesService.findAll(Number(limit) || 50, Number(offset) || 0);
+    return this.employeesService.findAll(
+      Number(limit) || 50,
+      Number(offset) || 0,
+    );
   }
 
   @Get(':id')

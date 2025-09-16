@@ -1,4 +1,9 @@
-import { ConflictException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import { Employee } from './employees.model';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
@@ -18,7 +23,9 @@ export class EmployeesService {
     // EMP + 6 random digits, retry a few times for uniqueness
     for (let i = 0; i < 5; i++) {
       const candidate = `EMP${Math.floor(100000 + Math.random() * 900000)}`;
-      const exists = await this.employeeModel.findOne({ where: { employeeId: candidate } });
+      const exists = await this.employeeModel.findOne({
+        where: { employeeId: candidate },
+      });
       if (!exists) return candidate;
     }
     // Fallback to timestamp-based
@@ -28,12 +35,17 @@ export class EmployeesService {
 
   async create(dto: CreateEmployeeDto): Promise<any> {
     // Enforce unique email
-    const emailExists = await this.employeeModel.findOne({ where: { email: dto.email } });
+    const emailExists = await this.employeeModel.findOne({
+      where: { email: dto.email },
+    });
     if (emailExists) throw new ConflictException('Email already exists');
     // Generate an employeeId on the server
     const employeeId = await this.generateUniqueEmployeeId();
     try {
-      const employee = await this.employeeModel.create({ ...dto, employeeId } as any);
+      const employee = await this.employeeModel.create({
+        ...dto,
+        employeeId,
+      } as any);
 
       // Derive role from department
       const mapDepartmentToRole = (department?: string): Role => {
@@ -69,19 +81,26 @@ export class EmployeesService {
             role,
           } as any);
         }
-      } catch (e) {
+      } catch {
         // Do not fail employee creation if user creation fails
       }
 
       // Return employee plus temp password info
       return { ...employee.toJSON(), temporaryPassword };
-    } catch (e) {
+    } catch {
       throw new InternalServerErrorException('Failed to create employee');
     }
   }
 
-  async findAll(limit = 50, offset = 0): Promise<{ rows: Employee[]; count: number }> {
-    return this.employeeModel.findAndCountAll({ limit, offset, order: [['createdAt', 'DESC']] });
+  async findAll(
+    limit = 50,
+    offset = 0,
+  ): Promise<{ rows: Employee[]; count: number }> {
+    return this.employeeModel.findAndCountAll({
+      limit,
+      offset,
+      order: [['createdAt', 'DESC']],
+    });
   }
 
   async findOne(id: string): Promise<Employee> {
@@ -93,16 +112,20 @@ export class EmployeesService {
   async update(id: string, dto: UpdateEmployeeDto): Promise<Employee> {
     const emp = await this.findOne(id);
     // Disallow changing employeeId via update
-    if ((dto as any).employeeId) delete (dto as any).employeeId;
+    if (Object.prototype.hasOwnProperty.call(dto, 'employeeId')) {
+      delete (dto as Record<string, unknown>)['employeeId'];
+    }
     // If email is being updated, ensure uniqueness
     if (dto.email && dto.email !== emp.email) {
-      const emailExists = await this.employeeModel.findOne({ where: { email: dto.email } });
+      const emailExists = await this.employeeModel.findOne({
+        where: { email: dto.email },
+      });
       if (emailExists) throw new ConflictException('Email already exists');
     }
     try {
       await emp.update({ ...dto });
       return emp;
-    } catch (e) {
+    } catch {
       throw new InternalServerErrorException('Failed to update employee');
     }
   }
@@ -111,7 +134,7 @@ export class EmployeesService {
     const emp = await this.findOne(id);
     try {
       await emp.destroy();
-    } catch (e) {
+    } catch {
       throw new InternalServerErrorException('Failed to delete employee');
     }
   }

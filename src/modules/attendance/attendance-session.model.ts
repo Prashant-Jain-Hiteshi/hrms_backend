@@ -1,4 +1,15 @@
-import { Table, Column, Model, DataType, Default, PrimaryKey, AllowNull, ForeignKey, BelongsTo, Index } from 'sequelize-typescript';
+import {
+  Table,
+  Column,
+  Model,
+  DataType,
+  Default,
+  PrimaryKey,
+  AllowNull,
+  ForeignKey,
+  BelongsTo,
+  Index,
+} from 'sequelize-typescript';
 import { Attendance } from './attendance.model';
 import { User } from '../users/users.model';
 
@@ -36,7 +47,7 @@ export class AttendanceSession extends Model {
   declare endTime?: string | null; // HH:MM:SS
 
   @AllowNull(true)
-  @Column(DataType.DECIMAL(5,2))
+  @Column(DataType.DECIMAL(5, 2))
   declare hours?: number | null; // duration for this session
 
   @BelongsTo(() => Attendance)

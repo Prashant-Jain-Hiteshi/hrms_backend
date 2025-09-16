@@ -1,4 +1,14 @@
-import { Table, Column, Model, DataType, Default, PrimaryKey, AllowNull, Unique, BelongsTo } from 'sequelize-typescript';
+import {
+  Table,
+  Column,
+  Model,
+  DataType,
+  Default,
+  PrimaryKey,
+  AllowNull,
+  Unique,
+  BelongsTo,
+} from 'sequelize-typescript';
 import { User } from '../users/users.model';
 
 @Table({ tableName: 'employees', timestamps: true })
@@ -43,7 +53,7 @@ export class Employee extends Model {
   declare joiningDate: string;
 
   @AllowNull(true)
-  @Column(DataType.DECIMAL(10,2))
+  @Column(DataType.DECIMAL(10, 2))
   declare salary?: number;
 
   @AllowNull(false)

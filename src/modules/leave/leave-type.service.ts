@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import { LeaveType } from './leave-type.model';
 import { CreateLeaveTypeDto, UpdateLeaveTypeDto } from './dto/leave-type.dto';
@@ -11,16 +16,18 @@ export class LeaveTypeService {
     private leaveTypeModel: typeof LeaveType,
   ) {}
 
-  async createLeaveType(createLeaveTypeDto: CreateLeaveTypeDto): Promise<LeaveType> {
+  async createLeaveType(
+    createLeaveTypeDto: CreateLeaveTypeDto,
+  ): Promise<LeaveType> {
     try {
       // Check if leave type with same name already exists (only among active records)
       const existingLeaveType = await this.leaveTypeModel.findOne({
-        where: { 
+        where: {
           name: {
-            [Op.iLike]: createLeaveTypeDto.name.trim()
+            [Op.iLike]: createLeaveTypeDto.name.trim(),
           },
-          isActive: true
-        }
+          isActive: true,
+        },
       });
 
       if (existingLeaveType) {
@@ -38,19 +45,23 @@ export class LeaveTypeService {
         throw error;
       }
       console.error('LeaveType creation error:', error);
-      
+
       // Provide more specific error messages
       if (error.name === 'SequelizeDatabaseError') {
         throw new BadRequestException(`Database error: ${error.message}`);
       }
       if (error.name === 'SequelizeValidationError') {
-        throw new BadRequestException(`Validation error: ${error.errors?.map((e: any) => e.message).join(', ')}`);
+        throw new BadRequestException(
+          `Validation error: ${error.errors?.map((e: any) => e.message).join(', ')}`,
+        );
       }
       if (error.name === 'SequelizeUniqueConstraintError') {
         throw new ConflictException('Leave type with this name already exists');
       }
-      
-      throw new BadRequestException(`Failed to create leave type: ${error.message}`);
+
+      throw new BadRequestException(
+        `Failed to create leave type: ${error.message}`,
+      );
     }
   }
 
@@ -73,19 +84,25 @@ export class LeaveTypeService {
     return leaveType;
   }
 
-  async updateLeaveType(id: number, updateLeaveTypeDto: UpdateLeaveTypeDto): Promise<LeaveType> {
+  async updateLeaveType(
+    id: number,
+    updateLeaveTypeDto: UpdateLeaveTypeDto,
+  ): Promise<LeaveType> {
     const leaveType = await this.getLeaveTypeById(id);
 
     // Check if name is being updated and if it conflicts with existing active records
-    if (updateLeaveTypeDto.name && updateLeaveTypeDto.name.trim() !== leaveType.name) {
+    if (
+      updateLeaveTypeDto.name &&
+      updateLeaveTypeDto.name.trim() !== leaveType.name
+    ) {
       const existingLeaveType = await this.leaveTypeModel.findOne({
-        where: { 
+        where: {
           name: {
-            [Op.iLike]: updateLeaveTypeDto.name.trim()
+            [Op.iLike]: updateLeaveTypeDto.name.trim(),
           },
           id: { [Op.ne]: id },
-          isActive: true
-        }
+          isActive: true,
+        },
       });
 
       if (existingLeaveType) {
@@ -96,7 +113,9 @@ export class LeaveTypeService {
     try {
       await leaveType.update({
         ...updateLeaveTypeDto,
-        name: updateLeaveTypeDto.name ? updateLeaveTypeDto.name.trim() : leaveType.name,
+        name: updateLeaveTypeDto.name
+          ? updateLeaveTypeDto.name.trim()
+          : leaveType.name,
       });
 
       return leaveType.reload();
@@ -129,15 +148,15 @@ export class LeaveTypeService {
         [Op.or]: [
           {
             name: {
-              [Op.iLike]: `%${searchTerm.trim()}%`
-            }
+              [Op.iLike]: `%${searchTerm.trim()}%`,
+            },
           },
           {
             description: {
-              [Op.iLike]: `%${searchTerm.trim()}%`
-            }
-          }
-        ]
+              [Op.iLike]: `%${searchTerm.trim()}%`,
+            },
+          },
+        ],
       },
       order: [['createdAt', 'DESC']],
     });
@@ -145,12 +164,9 @@ export class LeaveTypeService {
 
   async getLeaveTypesByEligibility(eligibility: string): Promise<LeaveType[]> {
     return this.leaveTypeModel.findAll({
-      where: { 
+      where: {
         isActive: true,
-        [Op.or]: [
-          { eligibility: 'all' },
-          { eligibility }
-        ]
+        [Op.or]: [{ eligibility: 'all' }, { eligibility }],
       },
       order: [['name', 'ASC']],
     });
@@ -158,7 +174,7 @@ export class LeaveTypeService {
 
   async toggleLeaveTypeStatus(id: number): Promise<LeaveType> {
     const leaveType = await this.leaveTypeModel.findByPk(id);
-    
+
     if (!leaveType) {
       throw new NotFoundException('Leave type not found');
     }

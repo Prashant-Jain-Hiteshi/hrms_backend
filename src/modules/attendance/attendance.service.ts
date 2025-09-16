@@ -1,5 +1,11 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
+
+import { AddEmployeeAttendanceDto } from './dto/add-employee-attendance.dto';
 import { Op } from 'sequelize';
 import { Attendance } from './attendance.model';
 import { AttendanceSession } from './attendance-session.model';
@@ -27,8 +33,10 @@ function diffHours(start: string, end: string): number {
 @Injectable()
 export class AttendanceService {
   constructor(
-    @InjectModel(Attendance) private readonly attendanceModel: typeof Attendance,
-    @InjectModel(AttendanceSession) private readonly sessionModel: typeof AttendanceSession,
+    @InjectModel(Attendance)
+    private readonly attendanceModel: typeof Attendance,
+    @InjectModel(AttendanceSession)
+    private readonly sessionModel: typeof AttendanceSession,
     @InjectModel(Employee) private readonly employeeModel: typeof Employee,
   ) {}
 
@@ -37,10 +45,14 @@ export class AttendanceService {
     const checkInTime = dto.checkInTime || nowTime();
 
     // Try to link employee by email (optional)
-    const employee = await this.employeeModel.findOne({ where: { email: user.email } });
+    const employee = await this.employeeModel.findOne({
+      where: { email: user.email },
+    });
 
     // Upsert parent attendance record
-    let record = await this.attendanceModel.findOne({ where: { userId: user.id, date } });
+    let record = await this.attendanceModel.findOne({
+      where: { userId: user.id, date },
+    });
     if (!record) {
       record = await this.attendanceModel.create({
         userId: user.id,
@@ -51,17 +63,32 @@ export class AttendanceService {
       } as any);
     } else {
       // update earliest checkIn if this is earlier
-      if (!record.checkIn || checkInTime < (record.checkIn as string)) {
-        await record.update({ checkIn: checkInTime, status: this.isLate(checkInTime) ? 'late' : (record.status || 'present') });
+      if (!record.checkIn || checkInTime < record.checkIn) {
+        await record.update({
+          checkIn: checkInTime,
+          status: this.isLate(checkInTime)
+            ? 'late'
+            : record.status || 'present',
+        });
       }
     }
 
     // Ensure no open session exists for today
-    const open = await this.sessionModel.findOne({ where: { userId: user.id, date, endTime: { [Op.is]: null } } });
-    if (open) throw new BadRequestException('You already have an active session. Please check out first.');
+    const open = await this.sessionModel.findOne({
+      where: { userId: user.id, date, endTime: { [Op.is]: null } },
+    });
+    if (open)
+      throw new BadRequestException(
+        'You already have an active session. Please check out first.',
+      );
 
     // Create a new session
-    await this.sessionModel.create({ attendanceId: record.id, userId: user.id, date, startTime: checkInTime } as any);
+    await this.sessionModel.create({
+      attendanceId: record.id,
+      userId: user.id,
+      date,
+      startTime: checkInTime,
+    } as any);
     return record;
   }
 
@@ -69,22 +96,39 @@ export class AttendanceService {
     const date = dto.date || toDateOnly(new Date());
     const checkOutTime = dto.checkOutTime || nowTime();
 
-    const record = await this.attendanceModel.findOne({ where: { userId: user.id, date } });
+    const record = await this.attendanceModel.findOne({
+      where: { userId: user.id, date },
+    });
     if (!record) throw new NotFoundException('No attendance record for today');
 
     // Find open session
-    const session = await this.sessionModel.findOne({ where: { userId: user.id, date, endTime: { [Op.is]: null } }, order: [['createdAt', 'DESC']] });
-    if (!session) throw new BadRequestException('No active session to check out');
+    const session = await this.sessionModel.findOne({
+      where: { userId: user.id, date, endTime: { [Op.is]: null } },
+      order: [['createdAt', 'DESC']],
+    });
+    if (!session)
+      throw new BadRequestException('No active session to check out');
 
-    const start = session.startTime as string;
+    const start = session.startTime;
     const duration = diffHours(start, checkOutTime);
     await session.update({ endTime: checkOutTime, hours: duration });
 
     // Re-aggregate hours from all sessions for today
-    const sessions = await this.sessionModel.findAll({ where: { userId: user.id, date } });
-    const totalHours = sessions.reduce((sum, s: any) => sum + (Number(s.hours) || 0), 0);
-    const lastEnd = sessions.reduce((max, s: any) => (s.endTime && s.endTime > max ? s.endTime : max), record.checkOut || '00:00:00');
-    await record.update({ hoursWorked: Number(totalHours.toFixed(2)), checkOut: lastEnd || checkOutTime });
+    const sessions = await this.sessionModel.findAll({
+      where: { userId: user.id, date },
+    });
+    const totalHours = sessions.reduce(
+      (sum, s: any) => sum + (Number(s.hours) || 0),
+      0,
+    );
+    const lastEnd = sessions.reduce(
+      (max, s: any) => (s.endTime && s.endTime > max ? s.endTime : max),
+      record.checkOut || '00:00:00',
+    );
+    await record.update({
+      hoursWorked: Number(totalHours.toFixed(2)),
+      checkOut: lastEnd || checkOutTime,
+    });
     return record;
   }
 
@@ -94,12 +138,19 @@ export class AttendanceService {
     else if (from) where.date = { [Op.gte]: from };
     else if (to) where.date = { [Op.lte]: to };
 
-    const rows = await this.attendanceModel.findAll({ where, order: [['date', 'DESC']] });
+    const rows = await this.attendanceModel.findAll({
+      where,
+      order: [['date', 'DESC']],
+    });
     return rows;
   }
 
   // Build an Excel-compatible CSV report for Admin/HR
-  async generateReport(params: { from?: string; to?: string; format?: 'excel' | 'pdf' }) {
+  async generateReport(params: {
+    from?: string;
+    to?: string;
+    format?: 'excel' | 'pdf';
+  }) {
     const { from, to, format = 'excel' } = params || {};
     const rows = await this.listAll(from, to);
 
@@ -119,12 +170,16 @@ export class AttendanceService {
     // If PDF requested, generate a paginated table PDF using pdfkit
     if (format === 'pdf') {
       // Lazy require to avoid type issues
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+
       const PDFDocument = require('pdfkit');
-      const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 36 });
+      const doc = new PDFDocument({
+        size: 'A4',
+        layout: 'landscape',
+        margin: 36,
+      });
 
       const chunks: Buffer[] = [];
-      const stream: NodeJS.WritableStream = doc as any;
+      const stream: NodeJS.WritableStream = doc;
       doc.on('data', (c: Buffer) => chunks.push(c));
       const endPromise = new Promise<Buffer>((resolve) => {
         doc.on('end', () => resolve(Buffer.concat(chunks)));
@@ -132,18 +187,22 @@ export class AttendanceService {
 
       // Title
       doc.fontSize(16).text('Attendance Report', { align: 'center' });
-      const rangeText = from && to ? `${from} to ${to}` : (from || to || 'All Dates');
-      doc.moveDown(0.5).fontSize(10).text(`Range: ${rangeText}`, { align: 'center' });
+      const rangeText =
+        from && to ? `${from} to ${to}` : from || to || 'All Dates';
+      doc
+        .moveDown(0.5)
+        .fontSize(10)
+        .text(`Range: ${rangeText}`, { align: 'center' });
       doc.moveDown(1);
 
       // Table layout
-      const startX = (doc as any).page.margins?.left ?? 36;
+      const startX = doc.page.margins?.left ?? 36;
       const startY = 100;
       const rowHeight = 22;
       // Base widths which we will scale to fit page
       const baseWidths = [120, 140, 100, 70, 60, 60, 90, 50]; // ID, Name, Dept, Date, In, Out, Status, Hours
-      const pageRightMargin = (doc as any).page.margins?.right ?? 36;
-      const pageBottom = doc.page.height - ((doc as any).page.margins?.bottom ?? 36);
+      const pageRightMargin = doc.page.margins?.right ?? 36;
+      const pageBottom = doc.page.height - (doc.page.margins?.bottom ?? 36);
       const availableWidth = doc.page.width - startX - pageRightMargin;
       const totalBase = baseWidths.reduce((a, b) => a + b, 0);
       const scale = availableWidth / totalBase;
@@ -153,13 +212,22 @@ export class AttendanceService {
       const padY = 6;
 
       // Helper to measure wrapped text height for a cell
-      const measureCellHeight = (text: string, width: number, fontSize: number, bold = false) => {
+      const measureCellHeight = (
+        text: string,
+        width: number,
+        fontSize: number,
+        bold = false,
+      ) => {
         doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(fontSize);
         const h = doc.heightOfString(text || '', { width, align: 'left' });
         return Math.max(h, 10);
       };
 
-      const drawRow = (y: number, cols: string[], opts?: { header?: boolean; zebra?: boolean; index?: number }) => {
+      const drawRow = (
+        y: number,
+        cols: string[],
+        opts?: { header?: boolean; zebra?: boolean; index?: number },
+      ) => {
         const isHeader = !!opts?.header;
         const rowIndex = opts?.index ?? 0;
         let x = startX;
@@ -167,37 +235,90 @@ export class AttendanceService {
         // Background fill (header or zebra rows)
         if (isHeader) {
           // compute header height (allow wrapping headers if needed)
-          const headerHeights = cols.map((t, i) => measureCellHeight(String(t ?? ''), colWidths[i] - padX * 2, 10, true));
+          const headerHeights = cols.map((t, i) =>
+            measureCellHeight(
+              String(t ?? ''),
+              colWidths[i] - padX * 2,
+              10,
+              true,
+            ),
+          );
           const rh = Math.max(rowHeight, Math.max(...headerHeights) + padY * 2);
-          doc.save().fillColor('#F2F2F2').rect(startX, y - 2, colWidths.reduce((a,b)=>a+b,0), rh).fill().restore();
+          doc
+            .save()
+            .fillColor('#F2F2F2')
+            .rect(
+              startX,
+              y - 2,
+              colWidths.reduce((a, b) => a + b, 0),
+              rh,
+            )
+            .fill()
+            .restore();
           // Text
           doc.fontSize(10).font('Helvetica-Bold').fillColor('#111111');
           x = startX;
           cols.forEach((text, idx) => {
             const w = colWidths[idx];
             const available = w - padX * 2;
-            doc.text(String(text ?? ''), x + padX, y + padY, { width: available, align: 'left' });
+            doc.text(String(text ?? ''), x + padX, y + padY, {
+              width: available,
+              align: 'left',
+            });
             x += w;
           });
           // Borders
           x = startX;
           doc.strokeColor('#DDDDDD');
-          doc.moveTo(x, y - 2).lineTo(x + colWidths.reduce((a,b)=>a+b,0), y - 2).stroke();
-          doc.moveTo(x, y - 2 + rh).lineTo(x + colWidths.reduce((a,b)=>a+b,0), y - 2 + rh).stroke();
-          for (const w of colWidths) { doc.moveTo(x, y - 2).lineTo(x, y - 2 + rh).stroke(); x += w; }
+          doc
+            .moveTo(x, y - 2)
+            .lineTo(x + colWidths.reduce((a, b) => a + b, 0), y - 2)
+            .stroke();
+          doc
+            .moveTo(x, y - 2 + rh)
+            .lineTo(x + colWidths.reduce((a, b) => a + b, 0), y - 2 + rh)
+            .stroke();
+          for (const w of colWidths) {
+            doc
+              .moveTo(x, y - 2)
+              .lineTo(x, y - 2 + rh)
+              .stroke();
+            x += w;
+          }
           return rh;
         } else if (opts?.zebra && rowIndex % 2 === 1) {
           // background will be drawn after height calc
         }
 
         // Measure dynamic row height based on wrapped content
-        const aligns: ('left'|'center'|'right')[] = ['left','left','left','left','center','center','center','right'];
-        const heights = cols.map((t, i) => measureCellHeight(String(t ?? ''), colWidths[i] - padX * 2, 9));
+        const aligns: ('left' | 'center' | 'right')[] = [
+          'left',
+          'left',
+          'left',
+          'left',
+          'center',
+          'center',
+          'center',
+          'right',
+        ];
+        const heights = cols.map((t, i) =>
+          measureCellHeight(String(t ?? ''), colWidths[i] - padX * 2, 9),
+        );
         const rh = Math.max(rowHeight, Math.max(...heights) + padY * 2);
 
         // Background for zebra rows
         if (opts?.zebra && rowIndex % 2 === 1) {
-          doc.save().fillColor('#FCFCFC').rect(startX, y - 2, colWidths.reduce((a,b)=>a+b,0), rh).fill().restore();
+          doc
+            .save()
+            .fillColor('#FCFCFC')
+            .rect(
+              startX,
+              y - 2,
+              colWidths.reduce((a, b) => a + b, 0),
+              rh,
+            )
+            .fill()
+            .restore();
         }
 
         // Text
@@ -207,16 +328,31 @@ export class AttendanceService {
           const w = colWidths[idx];
           const available = w - padX * 2;
           doc.fillColor('#111111');
-          doc.text(String(text ?? ''), x + padX, y + padY, { width: available, align: aligns[idx] });
+          doc.text(String(text ?? ''), x + padX, y + padY, {
+            width: available,
+            align: aligns[idx],
+          });
           x += w;
         });
 
         // Borders
         x = startX;
         doc.strokeColor('#DDDDDD');
-        doc.moveTo(x, y - 2).lineTo(x + colWidths.reduce((a,b)=>a+b,0), y - 2).stroke();
-        doc.moveTo(x, y - 2 + rh).lineTo(x + colWidths.reduce((a,b)=>a+b,0), y - 2 + rh).stroke();
-        for (const w of colWidths) { doc.moveTo(x, y - 2).lineTo(x, y - 2 + rh).stroke(); x += w; }
+        doc
+          .moveTo(x, y - 2)
+          .lineTo(x + colWidths.reduce((a, b) => a + b, 0), y - 2)
+          .stroke();
+        doc
+          .moveTo(x, y - 2 + rh)
+          .lineTo(x + colWidths.reduce((a, b) => a + b, 0), y - 2 + rh)
+          .stroke();
+        for (const w of colWidths) {
+          doc
+            .moveTo(x, y - 2)
+            .lineTo(x, y - 2 + rh)
+            .stroke();
+          x += w;
+        }
         return rh;
       };
 
@@ -230,8 +366,11 @@ export class AttendanceService {
       for (const r of rows as any[]) {
         const employee = r.Employee || r.employee || {};
         // Prefer human-readable employeeId; fallback to any internal id; shorten UUID-like only
-        let id = safe(employee.employeeId || r.employeeId || employee.id || r.userId || '');
-        if (id.length > 12 && /[0-9a-fA-F-]{20,}/.test(id)) id = id.replace(/-/g, '').slice(0, 8);
+        let id = safe(
+          employee.employeeId || r.employeeId || employee.id || r.userId || '',
+        );
+        if (id.length > 12 && /[0-9a-fA-F-]{20,}/.test(id))
+          id = id.replace(/-/g, '').slice(0, 8);
         const name = safe(employee.name || r.name || '');
         const dept = safe(employee.department || r.department || '');
         const date = safe(r.date || '');
@@ -242,7 +381,18 @@ export class AttendanceService {
 
         // compute height of this row to decide page break
         const probeHeight = ((): number => {
-          const heights = [id, name, dept, date, checkIn, checkOut, status, hours].map((t, i) => measureCellHeight(String(t ?? ''), colWidths[i] - padX * 2, 9));
+          const heights = [
+            id,
+            name,
+            dept,
+            date,
+            checkIn,
+            checkOut,
+            status,
+            hours,
+          ].map((t, i) =>
+            measureCellHeight(String(t ?? ''), colWidths[i] - padX * 2, 9),
+          );
           return Math.max(rowHeight, Math.max(...heights) + padY * 2);
         })();
         if (y + probeHeight > pageBottom) {
@@ -251,21 +401,29 @@ export class AttendanceService {
           const hh = drawRow(y, headers, { header: true });
           y += hh;
         }
-        const rh = drawRow(y, [id, name, dept, date, checkIn, checkOut, status, hours], { zebra: true, index: idx });
+        const rh = drawRow(
+          y,
+          [id, name, dept, date, checkIn, checkOut, status, hours],
+          { zebra: true, index: idx },
+        );
         y += rh;
         idx += 1;
       }
 
       doc.end();
       const buffer = await endPromise;
-      const rangeLabel = from && to ? `${from}_to_${to}` : (from || to || new Date().toISOString().slice(0, 10));
+      const rangeLabel =
+        from && to
+          ? `${from}_to_${to}`
+          : from || to || new Date().toISOString().slice(0, 10);
       const filename = `attendance_${rangeLabel}.pdf`;
       const contentType = 'application/pdf';
       return { buffer, filename, contentType };
     }
 
     // Default: CSV for Excel
-    const toCSVRow = (arr: string[]) => arr.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',');
+    const toCSVRow = (arr: string[]) =>
+      arr.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',');
     const lines: string[] = [];
     lines.push(toCSVRow(headers));
     for (const r of rows as any[]) {
@@ -278,12 +436,17 @@ export class AttendanceService {
       const checkOut = safe(r.checkOut || '');
       const status = safe(r.status || (r.checkIn ? 'present' : 'absent'));
       const hours = safe(r.hoursWorked ?? '');
-      lines.push(toCSVRow([id, name, dept, date, checkIn, checkOut, status, hours]));
+      lines.push(
+        toCSVRow([id, name, dept, date, checkIn, checkOut, status, hours]),
+      );
     }
 
     const csv = lines.join('\n');
     const buffer = Buffer.from(csv, 'utf-8');
-    const rangeLabel = from && to ? `${from}_to_${to}` : (from || to || new Date().toISOString().slice(0, 10));
+    const rangeLabel =
+      from && to
+        ? `${from}_to_${to}`
+        : from || to || new Date().toISOString().slice(0, 10);
     const filename = `attendance_${rangeLabel}.csv`;
     const contentType = 'text/csv; charset=utf-8';
 
@@ -294,8 +457,13 @@ export class AttendanceService {
     const day = date || toDateOnly(new Date());
     const [record, openSession, sessions] = await Promise.all([
       this.attendanceModel.findOne({ where: { userId: user.id, date: day } }),
-      this.sessionModel.findOne({ where: { userId: user.id, date: day, endTime: { [Op.is]: null } } }),
-      this.sessionModel.findAll({ where: { userId: user.id, date: day }, order: [['createdAt', 'ASC']] }),
+      this.sessionModel.findOne({
+        where: { userId: user.id, date: day, endTime: { [Op.is]: null } },
+      }),
+      this.sessionModel.findAll({
+        where: { userId: user.id, date: day },
+        order: [['createdAt', 'ASC']],
+      }),
     ]);
     const activeSession = !!openSession;
     return {
@@ -308,12 +476,15 @@ export class AttendanceService {
   }
 
   // Admin/HR: update a specific session's start/end time and re-aggregate parent attendance
-  async adminUpdateSession(sessionId: string, data: { startTime?: string; endTime?: string }) {
+  async adminUpdateSession(
+    sessionId: string,
+    data: { startTime?: string; endTime?: string },
+  ) {
     if (!sessionId) throw new BadRequestException('sessionId is required');
     const session = await this.sessionModel.findByPk(sessionId);
     if (!session) throw new NotFoundException('Session not found');
 
-    const startTime = data.startTime ?? (session.startTime as string);
+    const startTime = data.startTime ?? session.startTime;
     const endTime = data.endTime ?? (session.endTime as string | null);
 
     // Validate time format HH:MM:SS (basic)
@@ -338,12 +509,19 @@ export class AttendanceService {
     await session.update({ startTime, endTime: endTime ?? null, hours });
 
     // Re-aggregate parent attendance record
-    const date = session.date as string;
-    const userId = session.userId as string;
-    const record = await this.attendanceModel.findOne({ where: { userId, date } });
+    const date = session.date;
+    const userId = session.userId;
+    const record = await this.attendanceModel.findOne({
+      where: { userId, date },
+    });
     if (record) {
-      const sessions = await this.sessionModel.findAll({ where: { userId, date } });
-      const totalHours = sessions.reduce((sum, s: any) => sum + (Number(s.hours) || 0), 0);
+      const sessions = await this.sessionModel.findAll({
+        where: { userId, date },
+      });
+      const totalHours = sessions.reduce(
+        (sum, s: any) => sum + (Number(s.hours) || 0),
+        0,
+      );
       const firstStart = sessions.reduce((min: string | null, s: any) => {
         const st = s.startTime as string | null;
         if (!st) return min;
@@ -356,7 +534,11 @@ export class AttendanceService {
         if (!max) return et;
         return et > max ? et : max;
       }, null);
-      await record.update({ hoursWorked: Number(totalHours.toFixed(2)), checkIn: firstStart || record.checkIn, checkOut: lastEnd || record.checkOut });
+      await record.update({
+        hoursWorked: Number(totalHours.toFixed(2)),
+        checkIn: firstStart || record.checkIn,
+        checkOut: lastEnd || record.checkOut,
+      });
     }
 
     return { session, updatedHours: hours };
@@ -367,9 +549,16 @@ export class AttendanceService {
     if (!targetUserId) throw new BadRequestException('userId is required');
     const day = date || toDateOnly(new Date());
     const [record, openSession, sessions] = await Promise.all([
-      this.attendanceModel.findOne({ where: { userId: targetUserId, date: day } }),
-      this.sessionModel.findOne({ where: { userId: targetUserId, date: day, endTime: { [Op.is]: null } } }),
-      this.sessionModel.findAll({ where: { userId: targetUserId, date: day }, order: [['createdAt', 'ASC']] }),
+      this.attendanceModel.findOne({
+        where: { userId: targetUserId, date: day },
+      }),
+      this.sessionModel.findOne({
+        where: { userId: targetUserId, date: day, endTime: { [Op.is]: null } },
+      }),
+      this.sessionModel.findAll({
+        where: { userId: targetUserId, date: day },
+        order: [['createdAt', 'ASC']],
+      }),
     ]);
     const activeSession = !!openSession;
     return {
@@ -404,8 +593,8 @@ export class AttendanceService {
       where: { userId: user.id, date: { [Op.between]: [from, to] } },
     });
 
-    const present = records.filter(r => r.checkIn).length;
-    const late = records.filter(r => r.status === 'late').length;
+    const present = records.filter((r) => r.checkIn).length;
+    const late = records.filter((r) => r.status === 'late').length;
 
     // Approx working days Mon-Fri
     const workingDays = this.countWorkingDays(start, end);
@@ -449,7 +638,19 @@ export class AttendanceService {
 
     const rows = await this.attendanceModel.findAll({
       where,
-      include: [{ model: Employee, attributes: ['id', 'name', 'email', 'employeeId', 'department', 'designation'] }],
+      include: [
+        {
+          model: Employee,
+          attributes: [
+            'id',
+            'name',
+            'email',
+            'employeeId',
+            'department',
+            'designation',
+          ],
+        },
+      ],
       order: [['date', 'DESC']],
     });
     return rows;
@@ -459,12 +660,24 @@ export class AttendanceService {
   async listAllByStatus(day: string, status: 'absent') {
     if (!day) throw new BadRequestException('day is required');
     // Fetch all employees
-    const emps = await this.employeeModel.findAll({ attributes: ['id', 'name', 'email', 'employeeId', 'department', 'designation'] });
+    const emps = await this.employeeModel.findAll({
+      attributes: [
+        'id',
+        'name',
+        'email',
+        'employeeId',
+        'department',
+        'designation',
+      ],
+    });
     // Fetch any attendance records for that day
-    const todays = await this.attendanceModel.findAll({ where: { date: day }, attributes: ['employeeId', 'checkIn'] });
+    const todays = await this.attendanceModel.findAll({
+      where: { date: day },
+      attributes: ['employeeId', 'checkIn'],
+    });
     const presentEmployeeIds = new Set<string>();
     for (const r of todays as any[]) {
-      if ((r as any).checkIn) presentEmployeeIds.add(String((r as any).employeeId));
+      if (r.checkIn) presentEmployeeIds.add(String(r.employeeId));
     }
 
     // Build synthetic absent rows for employees without a check-in
@@ -481,7 +694,11 @@ export class AttendanceService {
         hoursWorked: 0,
         Employee: e,
       }));
-    rows.sort((a: any, b: any) => String(a.Employee?.name || '').localeCompare(String(b.Employee?.name || '')));
+    rows.sort((a: any, b: any) =>
+      String(a.Employee?.name || '').localeCompare(
+        String(b.Employee?.name || ''),
+      ),
+    );
     return rows as any[];
   }
 
@@ -509,13 +726,18 @@ export class AttendanceService {
     const normalizeCount = (val: any): number => {
       if (Array.isArray(val)) {
         // GroupedCountResultItem[] -> sum counts
-        return val.reduce((sum: number, item: any) => sum + Number(item?.count || 0), 0);
+        return val.reduce(
+          (sum: number, item: any) => sum + Number(item?.count || 0),
+          0,
+        );
       }
       const n = Number(val);
       return Number.isFinite(n) ? n : 0;
     };
     try {
-      const c1 = await (this.employeeModel as any).count({ where: { status: 'active' } });
+      const c1 = await (this.employeeModel as any).count({
+        where: { status: 'active' },
+      });
       activeEmployees = normalizeCount(c1);
       if (activeEmployees <= 0) {
         const c2 = await (this.employeeModel as any).count();
@@ -534,7 +756,8 @@ export class AttendanceService {
     });
 
     // Helper: label for weekday (server local)
-    const dayLabel = (d: Date) => d.toLocaleDateString('en-US', { weekday: 'short' });
+    const dayLabel = (d: Date) =>
+      d.toLocaleDateString('en-US', { weekday: 'short' });
 
     // Build Mon–Fri list
     const days: { date: string; name: string }[] = [];
@@ -547,7 +770,7 @@ export class AttendanceService {
     // Index rows by date
     const byDate = new Map<string, any[]>();
     for (const r of rows as any[]) {
-      const key = String((r as any).date);
+      const key = String(r.date);
       const arr = byDate.get(key) || [];
       arr.push(r);
       byDate.set(key, arr);
@@ -558,7 +781,7 @@ export class AttendanceService {
       const records = byDate.get(date) || [];
       // group records by canonical person id
       const byPerson = new Map<string, any[]>();
-      for (const rec of records as any[]) {
+      for (const rec of records) {
         const pid = String(rec.userId || rec.employeeId || '');
         if (!pid) continue;
         const arr = byPerson.get(pid) || [];
@@ -570,12 +793,14 @@ export class AttendanceService {
       let late = 0;
       for (const [, arr] of byPerson) {
         // present if any row has a checkIn
-        const anyCheckIn = arr.some(r => !!r.checkIn);
+        const anyCheckIn = arr.some((r) => !!r.checkIn);
         if (anyCheckIn) present += 1;
         // late if earliest check-in time is after cutoff (HH:MM:SS)
-        const withCheckIn = arr.filter(r => !!r.checkIn);
+        const withCheckIn = arr.filter((r) => !!r.checkIn);
         if (withCheckIn.length > 0) {
-          withCheckIn.sort((a, b) => String(a.checkIn).localeCompare(String(b.checkIn)));
+          withCheckIn.sort((a, b) =>
+            String(a.checkIn).localeCompare(String(b.checkIn)),
+          );
           const first = String(withCheckIn[0].checkIn);
           if (first && first > lateCutoff) late += 1;
         }
@@ -587,9 +812,238 @@ export class AttendanceService {
     return { from, to, totalEmployees: activeEmployees, days: data };
   }
 
+  // Get total present and absent days for a specific employee
+  async getEmployeeAttendanceSummary(
+    employeeId: string,
+    from?: string,
+    to?: string,
+  ) {
+    const whereClause: any = { employeeId };
+    
+    if (from && to) {
+      whereClause.date = { [Op.between]: [from, to] };
+    } else if (from) {
+      whereClause.date = { [Op.gte]: from };
+    } else if (to) {
+      whereClause.date = { [Op.lte]: to };
+    }
+
+    // Get all attendance records for the employee
+    const attendanceRecords = await this.attendanceModel.findAll({
+      where: whereClause,
+      attributes: ['date', 'status', 'checkIn'],
+    });
+
+    // Count present days (including late)
+    const presentDays = attendanceRecords.filter(
+      record => record.checkIn && (record.status === 'present' || record.status === 'late')
+    ).length;
+
+    // Calculate total working days in the period
+    let totalWorkingDays = 0;
+    if (from && to) {
+      totalWorkingDays = this.countWorkingDays(new Date(from), new Date(to));
+    } else {
+      // If no date range specified, use current month
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      totalWorkingDays = this.countWorkingDays(startOfMonth, endOfMonth);
+    }
+
+    const absentDays = Math.max(0, totalWorkingDays - presentDays);
+    const lateDays = attendanceRecords.filter(record => record.status === 'late').length;
+
+    return {
+      employeeId,
+      period: { from: from || 'current_month', to: to || 'current_month' },
+      totalWorkingDays,
+      presentDays,
+      absentDays,
+      lateDays,
+      attendancePercentage: totalWorkingDays > 0 ? ((presentDays / totalWorkingDays) * 100).toFixed(2) : '0.00'
+    };
+  }
+
+  // Get overall company attendance statistics
+  async getOverallAttendanceStats(from?: string, to?: string) {
+    const whereClause: any = {};
+    
+    if (from && to) {
+      whereClause.date = { [Op.between]: [from, to] };
+    } else if (from) {
+      whereClause.date = { [Op.gte]: from };
+    } else if (to) {
+      whereClause.date = { [Op.lte]: to };
+    }
+
+    // Get all employees (assuming all employees are active if no status field)
+    const totalEmployees = await this.employeeModel.count();
+
+    // Get attendance records
+    const attendanceRecords = await this.attendanceModel.findAll({
+      where: whereClause,
+      attributes: ['employeeId', 'date', 'status', 'checkIn'],
+    });
+
+    // Group by date to calculate daily statistics
+    const dailyStats = new Map<string, { present: Set<string>, late: Set<string> }>();
+    
+    attendanceRecords.forEach(record => {
+      if (!record.checkIn) return; // Skip records without check-in
+      
+      const date = record.date;
+      if (!dailyStats.has(date)) {
+        dailyStats.set(date, { present: new Set(), late: new Set() });
+      }
+      
+      const dayStats = dailyStats.get(date)!;
+      if (record.employeeId) {
+        dayStats.present.add(record.employeeId);
+        
+        if (record.status === 'late') {
+          dayStats.late.add(record.employeeId);
+        }
+      }
+    });
+
+    // Calculate averages
+    let totalPresentDays = 0;
+    let totalLateDays = 0;
+    let totalAbsentDays = 0;
+    let workingDaysCount = 0;
+
+    dailyStats.forEach((dayStats, date) => {
+      const presentCount = dayStats.present.size;
+      const lateCount = dayStats.late.size;
+      const absentCount = Math.max(0, totalEmployees - presentCount);
+      
+      totalPresentDays += presentCount;
+      totalLateDays += lateCount;
+      totalAbsentDays += absentCount;
+      workingDaysCount++;
+    });
+
+    const avgPresentPerDay = workingDaysCount > 0 ? (totalPresentDays / workingDaysCount).toFixed(2) : '0.00';
+    const avgAbsentPerDay = workingDaysCount > 0 ? (totalAbsentDays / workingDaysCount).toFixed(2) : '0.00';
+    const avgLatePerDay = workingDaysCount > 0 ? (totalLateDays / workingDaysCount).toFixed(2) : '0.00';
+
+    return {
+      period: { from: from || 'all_time', to: to || 'current_date' },
+      totalEmployees,
+      workingDaysAnalyzed: workingDaysCount,
+      totalPresentDays,
+      totalAbsentDays,
+      totalLateDays,
+      averages: {
+        presentPerDay: parseFloat(avgPresentPerDay),
+        absentPerDay: parseFloat(avgAbsentPerDay),
+        latePerDay: parseFloat(avgLatePerDay)
+      },
+      attendanceRate: totalEmployees > 0 && workingDaysCount > 0 
+        ? ((totalPresentDays / (totalEmployees * workingDaysCount)) * 100).toFixed(2) 
+        : '0.00'
+    };
+  }
+
+  // Get attendance statistics by date range with daily breakdown
+  async getAttendanceStatsByDateRange(from: string, to: string) {
+    const attendanceRecords = await this.attendanceModel.findAll({
+      where: {
+        date: { [Op.between]: [from, to] }
+      },
+      include: [{
+        model: this.employeeModel,
+        attributes: ['id', 'firstName', 'lastName', 'email']
+      }],
+      attributes: ['employeeId', 'date', 'status', 'checkIn', 'checkOut', 'hoursWorked'],
+      order: [['date', 'ASC']]
+    });
+
+    // Get total active employees
+    const totalEmployees = await this.employeeModel.count();
+
+    // Group by date
+    const dailyBreakdown = new Map<string, {
+      date: string,
+      present: number,
+      absent: number,
+      late: number,
+      presentEmployees: any[],
+      absentEmployees: string[]
+    }>();
+
+    // Initialize all dates in range
+    const startDate = new Date(from);
+    const endDate = new Date(to);
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+      const dateStr = toDateOnly(d);
+      // Skip weekends (assuming Monday-Friday work week)
+      if (d.getDay() !== 0 && d.getDay() !== 6) {
+        dailyBreakdown.set(dateStr, {
+          date: dateStr,
+          present: 0,
+          absent: totalEmployees,
+          late: 0,
+          presentEmployees: [],
+          absentEmployees: []
+        });
+      }
+    }
+
+    // Process attendance records
+    const presentEmployeesByDate = new Map<string, Set<string>>();
+    
+    attendanceRecords.forEach(record => {
+      if (!record.checkIn || !record.employeeId) return;
+      
+      const date = record.date;
+      if (!presentEmployeesByDate.has(date)) {
+        presentEmployeesByDate.set(date, new Set());
+      }
+      presentEmployeesByDate.get(date)!.add(record.employeeId);
+      
+      const dayData = dailyBreakdown.get(date);
+      if (dayData) {
+        const totalHours = record.hoursWorked || 0;
+        const weeklyHours = 40; // Assuming 40 hours per week
+        const averageHours = totalHours / weeklyHours;
+        const overtimeHours = totalHours > weeklyHours ? totalHours - weeklyHours : 0;
+
+        dayData.presentEmployees.push({
+          employeeId: record.employeeId,
+          status: record.status,
+          checkIn: record.checkIn,
+          checkOut: record.checkOut,
+          totalHours: totalHours.toFixed(2),
+          weeklyHours: weeklyHours.toFixed(2),
+          averageHours: averageHours.toFixed(2),
+          overtimeHours: overtimeHours > 0 ? overtimeHours.toFixed(2) : '0.00',
+        });
+        
+        if (record.status === 'late') {
+          dayData.late++;
+        }
+      }
+    });
+
+    // Convert map to array
+    const dailyArray = Array.from(dailyBreakdown.values());
+
+    return {
+      period: { from, to },
+      totalEmployees,
+      dailyBreakdown: dailyArray
+    };
+  }
+
   // DEV ONLY: seed last up to 4 weeks with present days according to counts array (length <= 4)
-  async seedLastWeeks(user: { id: string; email?: string }, weeksCounts: number[]) {
-    const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
+  async seedLastWeeks(
+    user: { id: string; email?: string },
+    weeksCounts: number[],
+  ) {
+    const clamp = (n: number, min: number, max: number) =>
+      Math.max(min, Math.min(max, n));
     const mondayOf = (weeksAgo: number) => {
       const today = new Date();
       const day = today.getDay(); // 0..6 Sun..Sat
@@ -617,10 +1071,15 @@ export class AttendanceService {
       }
       const chosen = candidates.slice(0, count);
       for (const date of chosen) {
-        const existing = await this.attendanceModel.findOne({ where: { userId: user.id, date } });
+        const existing = await this.attendanceModel.findOne({
+          where: { userId: user.id, date },
+        });
         if (existing?.checkIn) continue;
         if (existing) {
-          await existing.update({ checkIn: '09:10:00', status: this.isLate('09:10:00') ? 'late' : 'present' });
+          await existing.update({
+            checkIn: '09:10:00',
+            status: this.isLate('09:10:00') ? 'late' : 'present',
+          });
         } else {
           await this.attendanceModel.create({
             userId: user.id,
@@ -634,7 +1093,103 @@ export class AttendanceService {
 
     const from = toDateOnly(mondayOf(maxWeeks - 1 >= 0 ? maxWeeks - 1 : 0));
     const to = toDateOnly(new Date());
-    const rows = await this.attendanceModel.findAll({ where: { userId: user.id, date: { [Op.between]: [from, to] } }, order: [['date', 'ASC']] });
+    const rows = await this.attendanceModel.findAll({
+      where: { userId: user.id, date: { [Op.between]: [from, to] } },
+      order: [['date', 'ASC']],
+    });
     return { from, to, count: rows.length };
+  }
+
+  async addEmployeeAttendance(
+    attendanceData: AddEmployeeAttendanceDto,
+    user: { id: string; role: string },
+  ) {
+    try {
+      console.log('🔍 DEBUG: addEmployeeAttendance called with:', { attendanceData, user });
+      const { employeeId, date, checkIn, checkOut, description } = attendanceData;
+
+      // Validate employee exists
+      console.log('🔍 DEBUG: Looking for employee with ID:', employeeId);
+      const employee = await this.employeeModel.findByPk(employeeId);
+    if (!employee) {
+      throw new BadRequestException('Employee not found');
+    }
+
+    // Check if attendance record already exists for this date
+    const existingRecord = await this.attendanceModel.findOne({
+      where: {
+        employeeId,
+        date,
+      },
+    });
+
+    if (existingRecord) {
+      throw new BadRequestException(
+        `Attendance record already exists for ${employee.name} on ${date}`,
+      );
+    }
+
+    // Validate date format and ensure it's not in the future
+    const attendanceDate = new Date(date);
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+
+    if (attendanceDate > today) {
+      throw new BadRequestException('Cannot add attendance for future dates');
+    }
+
+    // Calculate status based on check-in time and company policy
+    let status = 'present';
+    const checkInTime = new Date(`${date}T${checkIn}`);
+    const workStartTime = new Date(`${date}T09:00:00`); // Assuming 9 AM start time
+
+    if (checkInTime > workStartTime) {
+      status = 'late';
+    }
+
+    // Calculate hours worked if check-out is provided
+    let hoursWorked = null;
+    if (checkOut) {
+      const checkOutTime = new Date(`${date}T${checkOut}`);
+      const diffMs = checkOutTime.getTime() - checkInTime.getTime();
+      hoursWorked = Math.max(0, diffMs / (1000 * 60 * 60)); // Convert to hours
+    }
+
+    // Create attendance record
+    const attendanceRecord = await this.attendanceModel.create({
+      employeeId,
+      userId: user.id, // Fix: Add the missing userId field
+      date,
+      checkIn,
+      checkOut: checkOut || null,
+      status,
+      hoursWorked,
+      notes: description || `Added by ${user.role.toUpperCase()}: ${user.id}`,
+    });
+
+    // Return the created record with employee details
+    const recordWithEmployee = await this.attendanceModel.findByPk(
+      attendanceRecord.id,
+      {
+        include: [
+          {
+            model: this.employeeModel,
+            as: 'Employee',
+            attributes: ['id', 'name', 'email'],
+          },
+        ],
+      },
+    );
+
+    return {
+      success: true,
+      message: `Attendance record added successfully for ${employee.name}`,
+      data: recordWithEmployee,
+    };
+    } catch (error) {
+      console.error('🚨 ERROR in addEmployeeAttendance:', error);
+      console.error('🚨 ERROR Stack:', error.stack);
+      throw error;
+    }
   }
 }

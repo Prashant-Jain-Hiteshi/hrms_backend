@@ -8,7 +8,9 @@ import { Employee } from '../employees/employees.model';
 import { User } from '../users/users.model';
 
 @Module({
-  imports: [SequelizeModule.forFeature([Attendance, AttendanceSession, Employee, User])],
+  imports: [
+    SequelizeModule.forFeature([Attendance, AttendanceSession, Employee, User]),
+  ],
   providers: [AttendanceService],
   controllers: [AttendanceController],
   exports: [AttendanceService],

@@ -8,6 +8,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { EmployeesModule } from './modules/employees/employees.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
 import { LeaveModule } from './modules/leave/leave.module';
+import { PayrollModule } from './modules/payroll/payroll.module';
 
 @Module({
   imports: [
@@ -18,7 +19,8 @@ import { LeaveModule } from './modules/leave/leave.module';
     SequelizeModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
-        const logging = config.get('DB_LOGGING') === 'true' ? console.log : false;
+        const logging =
+          config.get('DB_LOGGING') === 'true' ? console.log : false;
         const ssl = config.get('DB_SSL') === 'true';
         const dialectOptions = ssl
           ? { ssl: { require: true, rejectUnauthorized: false } }
@@ -43,6 +45,7 @@ import { LeaveModule } from './modules/leave/leave.module';
     EmployeesModule,
     AttendanceModule,
     LeaveModule,
+    PayrollModule,
   ],
   controllers: [AppController],
   providers: [AppService],

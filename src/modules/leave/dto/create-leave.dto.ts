@@ -1,9 +1,32 @@
-import { IsNotEmpty, IsString, IsEnum, IsArray, IsOptional, IsDateString, IsUUID } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsString,
+  IsEnum,
+  IsArray,
+  IsOptional,
+  IsDateString,
+  IsUUID,
+} from 'class-validator';
 
 export class CreateLeaveDto {
   @IsNotEmpty()
-  @IsEnum(['sick', 'casual', 'annual', 'maternity', 'paternity', 'emergency', 'other'])
-  leaveType: 'sick' | 'casual' | 'annual' | 'maternity' | 'paternity' | 'emergency' | 'other';
+  @IsEnum([
+    'sick',
+    'casual',
+    'annual',
+    'maternity',
+    'paternity',
+    'emergency',
+    'other',
+  ])
+  leaveType:
+    | 'sick'
+    | 'casual'
+    | 'annual'
+    | 'maternity'
+    | 'paternity'
+    | 'emergency'
+    | 'other';
 
   @IsNotEmpty()
   @IsDateString()
