@@ -8,7 +8,7 @@ export enum CompensatoryLeaveStatus {
 }
 
 export interface CompensatoryLeaveCreationAttributes {
-  userId: number;
+  userId: string;
   employeeId: string;
   employeeName: string;
   department?: string | null;
@@ -17,7 +17,7 @@ export interface CompensatoryLeaveCreationAttributes {
   assignedDate: string;
   expiryDate: string;
   status?: CompensatoryLeaveStatus;
-  assignedBy: number;
+  assignedBy: string;
   notes?: string | null;
 }
 
@@ -35,10 +35,10 @@ export class CompensatoryLeave extends Model<CompensatoryLeave, CompensatoryLeav
 
   @ForeignKey(() => User)
   @Column({
-    type: DataType.INTEGER,
+    type: DataType.UUID,
     allowNull: false,
   })
-  userId: number;
+  userId: string;
 
   @BelongsTo(() => User)
   user: User;
@@ -98,10 +98,10 @@ export class CompensatoryLeave extends Model<CompensatoryLeave, CompensatoryLeav
 
   @ForeignKey(() => User)
   @Column({
-    type: DataType.INTEGER,
+    type: DataType.UUID,
     allowNull: false,
   })
-  assignedBy: number;
+  assignedBy: string;
 
   @BelongsTo(() => User, 'assignedBy')
   assignedByUser: User;

@@ -3,10 +3,10 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { CompensatoryLeaveStatus } from '../compensatory-leave.model';
 
 export class CreateCompensatoryLeaveDto {
-  @ApiProperty({ description: 'User ID of the employee' })
+  @ApiProperty({ description: 'Employee ID' })
   @IsNotEmpty()
-  @IsInt()
-  userId: number;
+  @IsString()
+  employeeId: string;
 
   @ApiProperty({ description: 'Number of compensatory leave credits (0.5 to 10 days)', minimum: 0.5, maximum: 10 })
   @IsNotEmpty()

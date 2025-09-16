@@ -22,19 +22,26 @@ export class CompensatoryLeaveService {
     private employeeModel: typeof Employee,
   ) {}
 
-  async create(createDto: CreateCompensatoryLeaveDto, assignedByUserId: number): Promise<CompensatoryLeave> {
-    // Verify the user exists and get employee details
-    const user = await this.userModel.findByPk(createDto.userId, {
-      include: [{ model: Employee, as: 'employee' }]
+  async create(createDto: CreateCompensatoryLeaveDto, assignedByUserId: string): Promise<CompensatoryLeave> {
+    console.log('CompensatoryLeave create - DTO:', createDto);
+    console.log('CompensatoryLeave create - assignedByUserId:', assignedByUserId);
+    
+    // Find employee by ID and get associated user
+    const employee = await this.employeeModel.findByPk(createDto.employeeId, {
+      include: [{ model: User, as: 'user' }]
     });
 
-    if (!user) {
+    if (!employee) {
       throw new NotFoundException('Employee not found');
     }
 
-    const employee = user.employee;
-    if (!employee) {
-      throw new BadRequestException('User is not associated with an employee record');
+    // Find user by email since that's the relationship
+    const user = await this.userModel.findOne({
+      where: { email: employee.email }
+    });
+
+    if (!user) {
+      throw new BadRequestException('Employee is not associated with a user account');
     }
 
     // Verify expiry date is in the future
@@ -45,7 +52,7 @@ export class CompensatoryLeaveService {
     }
 
     const compensatoryLeave = await this.compensatoryLeaveModel.create({
-      userId: createDto.userId,
+      userId: user.id,
       employeeId: employee.employeeId,
       employeeName: employee.name,
       department: employee.department,

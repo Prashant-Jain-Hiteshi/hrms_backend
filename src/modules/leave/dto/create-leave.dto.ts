@@ -44,4 +44,7 @@ export class UpdateLeaveStatusDto {
   @IsOptional()
   @IsString()
   comments?: string;
+
+  @IsOptional()
+  allocation?: any;
 }

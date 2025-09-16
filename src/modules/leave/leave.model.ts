@@ -19,7 +19,6 @@ export class LeaveRequest extends Model {
 
   @AllowNull(false)
   @Column({ type: DataType.ENUM(...Object.values(LeaveType).map(v => v.toString())) })
-  @AllowNull(false)
   declare leaveType: LeaveType;
 
   @AllowNull(false)
