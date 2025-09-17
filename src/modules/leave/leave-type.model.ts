@@ -1,4 +1,13 @@
-import { Table, Column, Model, DataType, PrimaryKey, AutoIncrement, CreatedAt, UpdatedAt } from 'sequelize-typescript';
+import {
+  Table,
+  Column,
+  Model,
+  DataType,
+  PrimaryKey,
+  AutoIncrement,
+  CreatedAt,
+  UpdatedAt,
+} from 'sequelize-typescript';
 
 interface LeaveTypeCreationAttributes {
   name: string;

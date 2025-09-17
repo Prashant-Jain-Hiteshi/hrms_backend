@@ -1,4 +1,15 @@
-import { Table, Column, Model, DataType, Default, PrimaryKey, IsEmail, Unique, AllowNull, HasOne } from 'sequelize-typescript';
+import {
+  Table,
+  Column,
+  Model,
+  DataType,
+  Default,
+  PrimaryKey,
+  IsEmail,
+  Unique,
+  AllowNull,
+  HasOne,
+} from 'sequelize-typescript';
 import { Role } from '../../common/enums/role.enum';
 import { Employee } from '../employees/employees.model';
 
@@ -54,9 +65,10 @@ export class User extends Model {
   declare employee?: Employee;
 
   // Hide sensitive fields from API responses
-  toJSON() {
-    const values = { ...this.get() } as any;
-    delete values.passwordHash;
-    return values;
+  toJSON(): Record<string, unknown> {
+    const values = this.get({ plain: true }) as Record<string, unknown>;
+    const rest: Record<string, unknown> = { ...values };
+    delete (rest as { passwordHash?: unknown }).passwordHash;
+    return rest;
   }
 }

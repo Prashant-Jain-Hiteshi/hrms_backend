@@ -25,11 +25,14 @@ export class AuthService {
   }
 
   async issueToken(user: any) {
-    // Resolve Employee UUID by matching email
+    // Resolve Employee string employeeId by matching email
     let employeeId: string | undefined = undefined;
     try {
-      const employee = await this.employeeModel.findOne({ where: { email: user.email } });
-      employeeId = employee?.id;
+      const employee = await this.employeeModel.findOne({
+        where: { email: user.email },
+      });
+      // Use the string employeeId (like "EMP001") instead of UUID id
+      employeeId = employee?.employeeId;
     } catch {}
 
     const payload: any = { sub: user.id, email: user.email, role: user.role };
@@ -41,6 +44,6 @@ export class AuthService {
       await user.update({ lastLoginAt: new Date(), isFirstLogin: false });
     } catch {}
 
-    return { access_token, user: { ...user.toJSON?.() ?? user, employeeId } };
+    return { access_token, user: { ...(user.toJSON?.() ?? user), employeeId } };
   }
 }

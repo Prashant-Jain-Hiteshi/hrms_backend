@@ -1,4 +1,15 @@
-import { Table, Column, Model, DataType, Default, PrimaryKey, AllowNull, ForeignKey, BelongsTo, Index } from 'sequelize-typescript';
+import {
+  Table,
+  Column,
+  Model,
+  DataType,
+  Default,
+  PrimaryKey,
+  AllowNull,
+  ForeignKey,
+  BelongsTo,
+  Index,
+} from 'sequelize-typescript';
 import { User } from '../users/users.model';
 import { Employee } from '../employees/employees.model';
 
@@ -37,7 +48,7 @@ export class Attendance extends Model {
   declare checkOut?: string | null; // HH:MM:SS
 
   @AllowNull(true)
-  @Column(DataType.DECIMAL(5,2))
+  @Column(DataType.DECIMAL(5, 2))
   declare hoursWorked?: number | null; // e.g., 8.50
 
   @AllowNull(true)

@@ -1,15 +1,24 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import { Op } from 'sequelize';
-import { LeaveRequest, LeaveApprover, LeaveCc, LeaveStatusHistory } from './leave.model';
+import {
+  LeaveRequest,
+  LeaveApprover,
+  LeaveCc,
+  LeaveStatusHistory,
+} from './leave.model';
+import { Employee } from '../employees/employees.model';
+import { User } from '../users/users.model';
+import { CreateLeaveDto, UpdateLeaveStatusDto } from './dto/create-leave.dto';
 import { LeaveStatus } from './leave.types';
 import { LeaveCredit, LeaveCreditConfig } from './leave-credit.model';
-// Leave DTOs are now imported from their respective files
-import { CreateLeaveDto, UpdateLeaveStatusDto } from './dto/create-leave.dto';
-import { User } from '../users/users.model';
-import { Employee } from '../employees/employees.model';
 import { CompensatoryLeaveService } from './compensatory-leave.service';
-import { Logger } from '@nestjs/common';
 
 @Injectable()
 export class LeaveService {
@@ -29,16 +38,19 @@ export class LeaveService {
     private leaveCreditModel: typeof LeaveCredit,
     @InjectModel(LeaveCreditConfig)
     private leaveCreditConfigModel: typeof LeaveCreditConfig,
+    private compensatoryLeaveService: CompensatoryLeaveService,
   ) {}
 
   async createLeaveRequest(employeeId: string, createLeaveDto: CreateLeaveDto) {
     const { toEmployees, ccEmployees, ...leaveData } = createLeaveDto;
     this.logger.log(
-      `POST /leave requested by employeeId=${employeeId} | payload=${JSON.stringify({
-        ...leaveData,
-        toCount: toEmployees?.length || 0,
-        ccCount: ccEmployees?.length || 0,
-      })}`
+      `POST /leave requested by employeeId=${employeeId} | payload=${JSON.stringify(
+        {
+          ...leaveData,
+          toCount: toEmployees?.length || 0,
+          ccCount: ccEmployees?.length || 0,
+        },
+      )}`,
     );
 
     try {
@@ -48,10 +60,11 @@ export class LeaveService {
       });
 
       if (toEmployeesExist.length !== toEmployees.length) {
-        this.logger.warn('Validation failed: One or more TO employees not found');
+        this.logger.warn(
+          'Validation failed: One or more TO employees not found',
+        );
         throw new BadRequestException('One or more TO employees not found');
       }
-
 
       // Validate CC employees exist (if provided)
       if (ccEmployees && ccEmployees.length > 0) {
@@ -60,7 +73,9 @@ export class LeaveService {
         });
 
         if (ccEmployeesExist.length !== ccEmployees.length) {
-          this.logger.warn('Validation failed: One or more CC employees not found');
+          this.logger.warn(
+            'Validation failed: One or more CC employees not found',
+          );
           throw new BadRequestException('One or more CC employees not found');
         }
       }
@@ -78,7 +93,7 @@ export class LeaveService {
           leaveRequestId: leaveRequest.id,
           employeeId: empId,
           status: 'pending',
-        })
+        }),
       );
 
       // Create CC entries
@@ -88,7 +103,7 @@ export class LeaveService {
             leaveRequestId: leaveRequest.id,
             employeeId: empId,
             isRead: false,
-          })
+          }),
         ) || [];
 
       // Create initial status history
@@ -100,25 +115,48 @@ export class LeaveService {
         comments: 'Leave request submitted',
       });
 
-      await Promise.all([...approverPromises, ...ccPromises, statusHistoryPromise]);
+      await Promise.all([
+        ...approverPromises,
+        ...ccPromises,
+        statusHistoryPromise,
+      ]);
 
-      this.logger.log(`Leave request created successfully id=${leaveRequest.id}`);
-      return this.getLeaveRequestById(leaveRequest.id);
-    } catch (error) {
-      this.logger.error(
-        `Error creating leave request for employeeId=${employeeId}: ${error?.message}`,
-        error?.stack
+      this.logger.log(
+        `Leave request created successfully id=${leaveRequest.id}`,
       );
-      throw error;
+      return this.getLeaveRequestById(leaveRequest.id);
+    } catch (err: unknown) {
+      const e = err as Error;
+      this.logger.error(
+        `Error creating leave request for employeeId=${employeeId}: ${e.message}`,
+        e.stack,
+      );
+      throw err;
     }
   }
 
   async getLeaveRequests(employeeId: string, userRole: string) {
-    let whereClause: any = {};
+    let whereClause: Record<string, unknown> = {};
 
     if (userRole === 'employee') {
       // Employee can only see their own requests
-      whereClause.employeeId = employeeId;
+      // Convert string employeeId to UUID for database query
+      let employee = await this.employeeModel.findOne({
+        where: { employeeId },
+        attributes: ['id'],
+      });
+
+      // If not found by employeeId string, try by UUID (fallback)
+      if (!employee && employeeId) {
+        employee = await this.employeeModel.findOne({
+          where: { id: employeeId },
+          attributes: ['id'],
+        });
+      }
+
+      if (employee) {
+        whereClause.employeeId = employee.id; // Use UUID for database query
+      }
     } else if (userRole === 'admin') {
       // Admin can see all requests
       whereClause = {};
@@ -130,31 +168,35 @@ export class LeaveService {
         {
           model: Employee,
           as: 'employee',
-          attributes: ['id', 'name', 'email', 'employeeId']
+          attributes: ['id', 'name', 'email', 'employeeId'],
         },
         {
           model: Employee,
           as: 'approver',
-          attributes: ['id', 'name', 'email', 'employeeId']
+          attributes: ['id', 'name', 'email', 'employeeId'],
         },
         {
           model: LeaveApprover,
           as: 'toEmployees',
-          include: [{
-            model: Employee,
-            attributes: ['id', 'name', 'email', 'employeeId']
-          }]
+          include: [
+            {
+              model: Employee,
+              attributes: ['id', 'name', 'email', 'employeeId'],
+            },
+          ],
         },
         {
           model: LeaveCc,
           as: 'ccEmployees',
-          include: [{
-            model: Employee,
-            attributes: ['id', 'name', 'email', 'employeeId']
-          }]
-        }
+          include: [
+            {
+              model: Employee,
+              attributes: ['id', 'name', 'email', 'employeeId'],
+            },
+          ],
+        },
       ],
-      order: [['createdAt', 'DESC']]
+      order: [['createdAt', 'DESC']],
     });
   }
 
@@ -168,71 +210,84 @@ export class LeaveService {
             {
               model: Employee,
               as: 'employee',
-              attributes: ['id', 'name', 'email', 'employeeId']
+              attributes: ['id', 'name', 'email', 'employeeId'],
             },
             {
               model: LeaveApprover,
               as: 'toEmployees',
               where: { employeeId },
-              include: [{
-                model: Employee,
-                attributes: ['id', 'name', 'email', 'employeeId']
-              }]
+              include: [
+                {
+                  model: Employee,
+                  attributes: ['id', 'name', 'email', 'employeeId'],
+                },
+              ],
             },
             {
               model: LeaveCc,
               as: 'ccEmployees',
-              include: [{
-                model: Employee,
-                attributes: ['id', 'name', 'email', 'employeeId']
-              }]
-            }
+              include: [
+                {
+                  model: Employee,
+                  attributes: ['id', 'name', 'email', 'employeeId'],
+                },
+              ],
+            },
           ],
-          order: [['createdAt', 'DESC']]
+          order: [['createdAt', 'DESC']],
         }),
         this.leaveRequestModel.findAll({
           include: [
             {
               model: Employee,
               as: 'employee',
-              attributes: ['id', 'name', 'email', 'employeeId']
+              attributes: ['id', 'name', 'email', 'employeeId'],
             },
             {
               model: LeaveApprover,
               as: 'toEmployees',
-              include: [{
-                model: Employee,
-                attributes: ['id', 'name', 'email', 'employeeId']
-              }]
+              include: [
+                {
+                  model: Employee,
+                  attributes: ['id', 'name', 'email', 'employeeId'],
+                },
+              ],
             },
             {
               model: LeaveCc,
               as: 'ccEmployees',
               where: { employeeId },
-              include: [{
-                model: Employee,
-                attributes: ['id', 'name', 'email', 'employeeId']
-              }]
-            }
+              include: [
+                {
+                  model: Employee,
+                  attributes: ['id', 'name', 'email', 'employeeId'],
+                },
+              ],
+            },
           ],
-          order: [['createdAt', 'DESC']]
-        })
+          order: [['createdAt', 'DESC']],
+        }),
       ]);
 
-      const map = new Map<string, any>();
+      const map = new Map<string, LeaveRequest>();
       for (const lr of [...asApprover, ...asCc]) {
-        if (lr?.id) map.set(lr.id, lr);
+        const id = lr.id;
+        if (id) map.set(id, lr);
       }
       const merged = Array.from(map.values());
-      merged.sort((a: any, b: any) => {
-        const ad = a?.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const bd = b?.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return bd - ad;
-      });
+      const getCreatedAtTime = (x: LeaveRequest): number => {
+        // Sequelize instance may have get('createdAt') or plain field
+        const val = (x as any)?.get?.('createdAt') ?? (x as any)?.createdAt;
+        if (!val) return 0;
+        const date = typeof val === 'string' ? new Date(val) : (val as Date);
+        return isNaN(date.getTime()) ? 0 : date.getTime();
+      };
+      merged.sort((a, b) => getCreatedAtTime(b) - getCreatedAtTime(a));
       return merged;
-    } catch (error) {
-      this.logger.error(`GET /leave/mentions failed: ${error?.message}`, error?.stack);
-      throw error;
+    } catch (err: unknown) {
+      const e = err as Error;
+      this.logger.error(`GET /leave/mentions failed: ${e.message}`, e.stack);
+      throw err;
     }
   }
 
@@ -243,28 +298,32 @@ export class LeaveService {
         {
           model: Employee,
           as: 'employee',
-          attributes: ['id', 'name', 'email', 'employeeId']
+          attributes: ['id', 'name', 'email', 'employeeId'],
         },
         {
           model: LeaveApprover,
           as: 'toEmployees',
           where: { employeeId: approverId, status: 'pending' },
-          include: [{
-            model: Employee,
-            attributes: ['id', 'name', 'email', 'employeeId']
-          }]
+          include: [
+            {
+              model: Employee,
+              attributes: ['id', 'name', 'email', 'employeeId'],
+            },
+          ],
         },
         {
           model: LeaveCc,
           as: 'ccEmployees',
-          include: [{
-            model: Employee,
-            attributes: ['id', 'name', 'email', 'employeeId']
-          }]
-        }
+          include: [
+            {
+              model: Employee,
+              attributes: ['id', 'name', 'email', 'employeeId'],
+            },
+          ],
+        },
       ],
       where: { status: 'pending' },
-      order: [['createdAt', 'DESC']]
+      order: [['createdAt', 'DESC']],
     });
   }
 
@@ -275,27 +334,31 @@ export class LeaveService {
         {
           model: Employee,
           as: 'employee',
-          attributes: ['id', 'name', 'email', 'employeeId']
+          attributes: ['id', 'name', 'email', 'employeeId'],
         },
         {
           model: LeaveApprover,
           as: 'toEmployees',
-          include: [{
-            model: Employee,
-            attributes: ['id', 'name', 'email', 'employeeId']
-          }]
+          include: [
+            {
+              model: Employee,
+              attributes: ['id', 'name', 'email', 'employeeId'],
+            },
+          ],
         },
         {
           model: LeaveCc,
           as: 'ccEmployees',
           where: { employeeId: ccEmployeeId },
-          include: [{
-            model: Employee,
-            attributes: ['id', 'name', 'email', 'employeeId']
-          }]
-        }
+          include: [
+            {
+              model: Employee,
+              attributes: ['id', 'name', 'email', 'employeeId'],
+            },
+          ],
+        },
       ],
-      order: [['createdAt', 'DESC']]
+      order: [['createdAt', 'DESC']],
     });
   }
 
@@ -305,40 +368,46 @@ export class LeaveService {
         {
           model: Employee,
           as: 'employee',
-          attributes: ['id', 'name', 'email', 'employeeId']
+          attributes: ['id', 'name', 'email', 'employeeId'],
         },
         {
           model: Employee,
           as: 'approver',
-          attributes: ['id', 'name', 'email', 'employeeId']
+          attributes: ['id', 'name', 'email', 'employeeId'],
         },
         {
           model: LeaveApprover,
           as: 'toEmployees',
-          include: [{
-            model: Employee,
-            attributes: ['id', 'name', 'email', 'employeeId']
-          }]
+          include: [
+            {
+              model: Employee,
+              attributes: ['id', 'name', 'email', 'employeeId'],
+            },
+          ],
         },
         {
           model: LeaveCc,
           as: 'ccEmployees',
-          include: [{
-            model: Employee,
-            attributes: ['id', 'name', 'email', 'employeeId']
-          }]
+          include: [
+            {
+              model: Employee,
+              attributes: ['id', 'name', 'email', 'employeeId'],
+            },
+          ],
         },
         {
           model: LeaveStatusHistory,
           as: 'statusHistory',
-          include: [{
-            model: Employee,
-            as: 'changedByEmployee',
-            attributes: ['id', 'name', 'email', 'employeeId']
-          }],
-          order: [['changedAt', 'DESC']]
-        }
-      ]
+          include: [
+            {
+              model: Employee,
+              as: 'changedByEmployee',
+              attributes: ['id', 'name', 'email', 'employeeId'],
+            },
+          ],
+          order: [['changedAt', 'DESC']],
+        },
+      ],
     });
 
     if (!leaveRequest) {
@@ -351,7 +420,7 @@ export class LeaveService {
   async updateLeaveStatus(
     leaveRequestId: string,
     approverId: string,
-    updateStatusDto: UpdateLeaveStatusDto
+    updateStatusDto: UpdateLeaveStatusDto,
   ) {
     const leaveRequest = await this.getLeaveRequestById(leaveRequestId);
 
@@ -360,12 +429,14 @@ export class LeaveService {
       where: {
         leaveRequestId,
         employeeId: approverId,
-        status: 'pending'
-      }
+        status: 'pending',
+      },
     });
 
     if (!approver) {
-      throw new ForbiddenException('You are not authorized to approve this leave request');
+      throw new ForbiddenException(
+        'You are not authorized to approve this leave request',
+      );
     }
 
     // Update leave request status
@@ -373,14 +444,14 @@ export class LeaveService {
       status: updateStatusDto.status,
       approvedBy: approverId,
       approvedAt: new Date(),
-      comments: updateStatusDto.comments
+      comments: updateStatusDto.comments,
     });
 
     // Update approver status
     await approver.update({
       status: updateStatusDto.status,
       comments: updateStatusDto.comments,
-      actionAt: new Date()
+      actionAt: new Date(),
     });
 
     // Create status history entry
@@ -389,7 +460,7 @@ export class LeaveService {
       status: updateStatusDto.status,
       changedBy: approverId,
       changedAt: new Date(),
-      comments: updateStatusDto.comments || `Leave ${updateStatusDto.status}`
+      comments: updateStatusDto.comments || `Leave ${updateStatusDto.status}`,
     });
 
     return this.getLeaveRequestById(leaveRequestId);
@@ -399,8 +470,8 @@ export class LeaveService {
     const ccEntry = await this.leaveCcModel.findOne({
       where: {
         leaveRequestId,
-        employeeId: ccEmployeeId
-      }
+        employeeId: ccEmployeeId,
+      },
     });
 
     if (!ccEntry) {
@@ -409,7 +480,7 @@ export class LeaveService {
 
     await ccEntry.update({
       isRead: true,
-      readAt: new Date()
+      readAt: new Date(),
     });
 
     return { message: 'Marked as read' };
@@ -420,7 +491,9 @@ export class LeaveService {
 
     // Only employee who created the request or admin can delete
     if (userRole !== 'admin' && leaveRequest.employeeId !== employeeId) {
-      throw new ForbiddenException('You can only delete your own leave requests');
+      throw new ForbiddenException(
+        'You can only delete your own leave requests',
+      );
     }
 
     // Can only delete pending requests
@@ -432,7 +505,7 @@ export class LeaveService {
     await Promise.all([
       this.leaveApproverModel.destroy({ where: { leaveRequestId: id } }),
       this.leaveCcModel.destroy({ where: { leaveRequestId: id } }),
-      this.leaveStatusHistoryModel.destroy({ where: { leaveRequestId: id } })
+      this.leaveStatusHistoryModel.destroy({ where: { leaveRequestId: id } }),
     ]);
 
     // Delete leave request
@@ -446,7 +519,9 @@ export class LeaveService {
 
     // Only the employee who created the request can cancel
     if (leaveRequest.employeeId !== employeeId) {
-      throw new ForbiddenException('You can only cancel your own leave requests');
+      throw new ForbiddenException(
+        'You can only cancel your own leave requests',
+      );
     }
 
     // Can only cancel pending requests
@@ -475,12 +550,33 @@ export class LeaveService {
   }
 
   async getLeaveBalance(employeeId: string) {
-    // DOJ-based monthly accrual using LeaveCreditConfig
-    // 1) Get employee DOJ
-    const employee = await this.employeeModel.findByPk(employeeId, { attributes: ['id', 'joiningDate'], raw: true });
-    if (!employee?.joiningDate) {
-      throw new NotFoundException('Employee or joiningDate not found');
+    // Get employee details first - handle both string employeeId and UUID lookups
+    let employee = await this.employeeModel.findOne({
+      where: { employeeId },
+      attributes: ['id', 'employeeId', 'name', 'joiningDate'],
+    });
+
+    // If not found by employeeId string, try by UUID (fallback)
+    if (!employee && employeeId) {
+      employee = await this.employeeModel.findOne({
+        where: { id: employeeId },
+        attributes: ['id', 'employeeId', 'name', 'joiningDate'],
+      });
     }
+
+    if (!employee) {
+      throw new NotFoundException(`Employee not found with ID: ${employeeId}`);
+    }
+
+    // Get all leave types (hardcoded for now, will be dynamic when LeaveTypes module is added)
+    const leaveTypes = [
+      { name: 'Annual Leave', numberOfLeaves: 20 },
+      { name: 'Sick Leave', numberOfLeaves: 10 },
+      { name: 'Casual Leave', numberOfLeaves: 5 },
+      { name: 'Maternity Leave', numberOfLeaves: 90 },
+      { name: 'Paternity Leave', numberOfLeaves: 15 },
+      { name: 'Emergency Leave', numberOfLeaves: 3 },
+    ];
 
     const now = new Date();
     const currentYear = now.getFullYear();
@@ -508,84 +604,46 @@ export class LeaveService {
       order: [['leaveType', 'ASC']],
     });
 
-    // 3) Compute used days (approved leaves within current year, clamped within the year)
+    // Get approved leaves for the current year
     const approvedLeaves = await this.leaveRequestModel.findAll({
-      where: { employeeId, status: 'approved' },
+      where: {
+        employeeId: employee.id, // Use UUID instead of string employeeId
+        status: 'approved',
+      },
       attributes: ['leaveType', 'startDate', 'endDate'],
-      raw: true,
     });
 
-    const yearStart = new Date(currentYear, 0, 1);
-    const yearEnd = new Date(currentYear, 11, 31, 23, 59, 59, 999);
-    const dayMs = 24 * 60 * 60 * 1000;
+    // Calculate used days per leave type
+    const balance: Record<
+      string,
+      { total: number; used: number; remaining: number; displayName: string }
+    > = {};
 
-    const usedByType: Record<string, number> = {};
-    for (const lr of approvedLeaves) {
-      const type = (lr as any).leaveType as string;
-      if (!type) continue;
-      const s = new Date((lr as any).startDate);
-      const e = new Date((lr as any).endDate);
-      // clamp to current year window
-      const clampedStart = s < yearStart ? yearStart : s;
-      const clampedEnd = e > yearEnd ? yearEnd : e;
-      if (clampedEnd < clampedStart) continue;
-      const days = Math.floor((clampedEnd.getTime() - clampedStart.getTime()) / dayMs) + 1; // inclusive
-      usedByType[type] = (usedByType[type] || 0) + days;
-    }
+    leaveTypes.forEach((leaveType) => {
+      const typeName = leaveType.name.toLowerCase().replace(/\s+/g, '');
+      const typeLeaves = approvedLeaves.filter((leave) => {
+        const leaveTypeName = leave.leaveType.toLowerCase().replace(/\s+/g, '');
+        return (
+          leaveTypeName === typeName ||
+          leaveTypeName === leaveType.name.toLowerCase().replace(' leave', '')
+        );
+      });
 
-    // 4) Build raw totals by type from configs; if no configs, fall back to zeros
-    const balance: Record<string, { total: number; used: number; remaining: number }> = {};
-    for (const cfg of configs) {
-      const type = String((cfg as any).leaveType || '').toLowerCase();
-      const monthly = Number((cfg as any).monthlyCredit ?? 0) || 0;
-      const maxAnnual = (cfg as any).maxAnnualLimit != null ? Number((cfg as any).maxAnnualLimit) : null;
+      const usedDays = typeLeaves.reduce((total, leave) => {
+        const startDate = new Date(leave.startDate);
+        const endDate = new Date(leave.endDate);
+        const diffTime = Math.abs(endDate.getTime() - startDate.getTime());
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+        return total + diffDays;
+      }, 0);
 
-      let total = Number((monthsEligible * monthly).toFixed(2));
-      if (maxAnnual != null) total = Math.min(total, maxAnnual);
-      const used = Number(usedByType[type] || 0);
-      balance[type] = { total, used, remaining: 0 } as any; // remaining computed after cascading
-    }
-
-    // 5) Cascading deduction: each type consumes its own total first, then borrows from 'annual', remainder becomes LWP
-    const ANNUAL_KEY = 'annual';
-    const types = Object.keys(balance);
-    const hasAnnual = types.includes(ANNUAL_KEY);
-    let annualTotal = hasAnnual ? Number(balance[ANNUAL_KEY].total || 0) : 0;
-    let annualUsedDirect = Number(usedByType[ANNUAL_KEY] || 0);
-    let annualRemaining = Math.max(0, Number((annualTotal - annualUsedDirect).toFixed(2)));
-    let lwp = 0;
-
-    for (const type of types) {
-      if (type === ANNUAL_KEY) continue;
-      const total = Number(balance[type].total || 0);
-      const used = Number(balance[type].used || 0);
-      // Consume own bucket first
-      const ownCovered = Math.min(used, total);
-      const overflow = Math.max(0, used - ownCovered);
-      // Borrow overflow from annual
-      const borrowFromAnnual = Math.min(overflow, annualRemaining);
-      annualRemaining = Number((annualRemaining - borrowFromAnnual).toFixed(2));
-      const stillUncovered = Math.max(0, overflow - borrowFromAnnual);
-      lwp += stillUncovered; // remainder becomes LWP
-
-      // Remaining for this type is what's left in its own bucket after covering own used
-      const remaining = Math.max(0, Number((total - used).toFixed(2)));
-      balance[type].remaining = remaining;
-    }
-
-    // Now compute annual's remaining considering direct annual used plus any borrowed
-    // Borrowed amount = (original annualTotal - annualUsedDirect) - annualRemaining
-    const annualBorrowed = Math.max(0, Number(((annualTotal - annualUsedDirect) - annualRemaining).toFixed(2)));
-    if (hasAnnual) {
-      const annualUsedCombined = Number((annualUsedDirect + annualBorrowed).toFixed(2));
-      balance[ANNUAL_KEY].used = annualUsedCombined;
-      balance[ANNUAL_KEY].remaining = Math.max(0, Number((annualTotal - annualUsedCombined).toFixed(2)));
-    }
-
-    // 6) Expose LWP as a virtual type in the balance map
-    if (lwp > 0) {
-      balance['lwp'] = { total: 0, used: Number(lwp.toFixed(2)), remaining: 0 };
-    }
+      balance[typeName] = {
+        total: leaveType.numberOfLeaves,
+        used: usedDays,
+        remaining: Math.max(0, leaveType.numberOfLeaves - usedDays),
+        displayName: leaveType.name,
+      };
+    });
 
     return balance;
   }
@@ -710,29 +768,52 @@ export class LeaveService {
   }
 
   async getLeaveStatistics(employeeId?: string) {
-    let whereClause: any = {};
-    
+    const whereClause: Record<string, unknown> = {};
+
     if (employeeId) {
-      whereClause.employeeId = employeeId;
+      // Convert string employeeId to UUID for database query
+      let employee = await this.employeeModel.findOne({
+        where: { employeeId },
+        attributes: ['id'],
+      });
+
+      // If not found by employeeId string, try by UUID (fallback)
+      if (!employee && employeeId) {
+        employee = await this.employeeModel.findOne({
+          where: { id: employeeId },
+          attributes: ['id'],
+        });
+      }
+
+      if (employee) {
+        whereClause.employeeId = employee.id; // Use UUID for database query
+      }
     }
 
     const [total, pending, approved, rejected] = await Promise.all([
       this.leaveRequestModel.count({ where: whereClause }),
-      this.leaveRequestModel.count({ where: { ...whereClause, status: 'pending' } }),
-      this.leaveRequestModel.count({ where: { ...whereClause, status: 'approved' } }),
-      this.leaveRequestModel.count({ where: { ...whereClause, status: 'rejected' } })
+      this.leaveRequestModel.count({
+        where: { ...whereClause, status: 'pending' },
+      }),
+      this.leaveRequestModel.count({
+        where: { ...whereClause, status: 'approved' },
+      }),
+      this.leaveRequestModel.count({
+        where: { ...whereClause, status: 'rejected' },
+      }),
     ]);
 
     return {
       total,
       pending,
       approved,
-      rejected
+      rejected,
     };
   }
 
   // Compute monthly deducted (paid leave) and LWP for a date range
   async getMonthlyLedger(employeeId: string, from?: string, to?: string) {
+    try {
     const now = new Date();
     const defaultFrom = new Date(now.getFullYear(), 0, 1); // Jan 1 current year
     const defaultTo = new Date(now.getFullYear(), now.getMonth(), 1); // cap at current month start
@@ -744,10 +825,148 @@ export class LeaveService {
     // IMPORTANT: For DB filtering, include the ENTIRE capped end month
     const endBoundary = new Date(end.getFullYear(), end.getMonth() + 1, 0, 23, 59, 59, 999);
 
+    // Get employee to find associated user
+    // Handle both string employeeId and UUID lookups for compatibility
+    let employee = await this.employeeModel.findOne({
+      where: { employeeId },
+      include: [{ model: User, as: 'user' }]
+    });
+
+    // If not found by employeeId string, try by UUID (fallback)
+    if (!employee && employeeId) {
+      employee = await this.employeeModel.findOne({
+        where: { id: employeeId },
+        include: [{ model: User, as: 'user' }]
+      });
+    }
+
+    if (!employee) {
+      throw new Error(`Employee not found with ID: ${employeeId}`);
+    }
+
+    let compensatoryCredits: Record<string, number> = {};
+    if (employee?.user) {
+      console.log('🔍 DEBUG - Employee found:', {
+        employeeId: employee.employeeId,
+        employeeName: employee.name,
+        userId: employee.user.id,
+        userEmail: employee.user.email
+      });
+      try {
+        // Fetch compensatory leave credits by assigned month for the date range
+        const compensatoryLeaves = await this.compensatoryLeaveService.findByUserId(
+          employee.user.id, // Use UUID string directly
+          'active' as any
+        );
+        console.log('🔍 DEBUG - Compensatory leaves found:', compensatoryLeaves.length);
+        console.log('🔍 DEBUG - Compensatory leaves data:', JSON.stringify(compensatoryLeaves, null, 2));
+
+      // Group compensatory credits by assigned month
+      // Credits are applied to the month BEFORE the assigned month
+      compensatoryLeaves.forEach((credit: any) => {
+        try {
+          console.log('🔍 DEBUG - Full credit object keys:', Object.keys(credit));
+          console.log('🔍 DEBUG - Raw assignedDate from DB:', credit.assignedDate);
+          console.log('🔍 DEBUG - Raw assigned_date from DB:', credit.assigned_date);
+          console.log('🔍 DEBUG - Credit dataValues:', credit.dataValues);
+          
+          // Try different possible field names
+          const assignedDateValue = credit.assignedDate || credit.assigned_date || credit.dataValues?.assignedDate || credit.dataValues?.assigned_date;
+          console.log('🔍 DEBUG - Final assignedDateValue:', assignedDateValue);
+          
+          let assignedDate: Date;
+          if (!assignedDateValue) {
+            console.error('🚨 ERROR - No assignedDate found in any format, using current month middle');
+            // Fallback: use middle of current month as you suggested
+            const now = new Date();
+            assignedDate = new Date(now.getFullYear(), now.getMonth(), 15); // 15th of current month
+            console.log('🔍 DEBUG - Using fallback assignedDate:', assignedDate);
+          } else {
+            assignedDate = new Date(assignedDateValue);
+          }
+          console.log('🔍 DEBUG - Parsed assignedDate:', assignedDate);
+          
+          // Check if assignedDate is valid
+          if (isNaN(assignedDate.getTime())) {
+            console.error('🚨 ERROR - Invalid assignedDate:', credit.assignedDate);
+            return; // Skip this credit
+          }
+          
+          // Calculate the previous month from assigned date (safer approach)
+          const assignedYear = assignedDate.getFullYear();
+          const assignedMonth = assignedDate.getMonth();
+          
+          console.log('🔍 DEBUG - Assigned year/month:', assignedYear, assignedMonth);
+          
+          // Calculate previous month and year
+          let previousYear = assignedYear;
+          let previousMonthIndex = assignedMonth - 1;
+          
+          // Handle year rollover (January -> December of previous year)
+          if (previousMonthIndex < 0) {
+            previousMonthIndex = 11; // December
+            previousYear = assignedYear - 1;
+          }
+          
+          console.log('🔍 DEBUG - Previous year/month:', previousYear, previousMonthIndex);
+          
+          // Create previous month date safely (use day 1 to avoid invalid dates)
+          const previousMonth = new Date(previousYear, previousMonthIndex, 1);
+          
+          console.log('🔍 DEBUG - Previous month date:', previousMonth);
+          
+          // Check if previousMonth is valid
+          if (isNaN(previousMonth.getTime())) {
+            console.error('🚨 ERROR - Invalid previousMonth date');
+            return; // Skip this credit
+          }
+          
+          const yearMonth = `${previousYear}-${String(previousMonthIndex + 1).padStart(2, '0')}`;
+          
+          // Only include credits within the requested date range (check both assigned and credited month)
+          const creditedDate = previousMonth;
+          // Try different ways to access credits field
+          const creditsValue = credit.credits || credit.dataValues?.credits || 0;
+          console.log('🔍 DEBUG - Raw credits from DB:', credit.credits);
+          console.log('🔍 DEBUG - Credits from dataValues:', credit.dataValues?.credits);
+          console.log('🔍 DEBUG - Final creditsValue:', creditsValue);
+          
+          console.log('🔍 DEBUG - Processing credit:', {
+            assignedDate: assignedDate.toISOString(),
+            creditedDate: creditedDate.toISOString(),
+            yearMonth,
+            credits: creditsValue,
+            dateRangeStart: start.toISOString(),
+            dateRangeEnd: endBoundary.toISOString(),
+            assignedInRange: assignedDate >= start && assignedDate <= endBoundary,
+            creditedInRange: creditedDate >= start && creditedDate <= endBoundary
+          });
+          
+          // Check if credit should be included in the date range
+          if ((assignedDate >= start && assignedDate <= endBoundary) || 
+              (creditedDate >= start && creditedDate <= endBoundary)) {
+            compensatoryCredits[yearMonth] = (compensatoryCredits[yearMonth] || 0) + Number(creditsValue);
+            console.log('🔍 DEBUG - Credit added to month:', yearMonth, 'Total:', compensatoryCredits[yearMonth]);
+          } else {
+            console.log('🔍 DEBUG - Credit NOT in date range, skipping');
+          }
+        } catch (dateError) {
+          console.error('🚨 ERROR in date processing for credit:', credit.id, dateError);
+          return; // Skip this credit
+        }
+      });
+      } catch (compensatoryError) {
+        console.error('🚨 ERROR fetching compensatory leave credits:', compensatoryError);
+        // Continue without compensatory credits if service fails
+        compensatoryCredits = {};
+      }
+    }
+
     // Fetch approved leaves for employee intersecting the window (quick filter by year span)
+    // Use the employee's UUID for the database query, not the string employeeId
     const approved = await this.leaveRequestModel.findAll({
       where: {
-        employeeId,
+        employeeId: employee.id, // Use UUID instead of string employeeId
         status: 'approved',
         // broad filter by dates overlapping range
         [Op.or]: [
@@ -849,7 +1068,20 @@ export class LeaveService {
     }
 
     // Build rows in order of months with zeros where missing
-    const rows = months.map((m) => ({ ym: m, deducted: Number(deducted[m] || 0), lwp: Number(lwp[m] || 0) }));
+    console.log('🔍 DEBUG - Final compensatoryCredits object:', compensatoryCredits);
+    const rows = months.map((m) => ({ 
+      ym: m, 
+      deducted: Number(deducted[m] || 0), 
+      lwp: Number(lwp[m] || 0),
+      extraCredit: Number(compensatoryCredits[m] || 0),
+      extraCreditBreakdown: compensatoryCredits[m] ? `${compensatoryCredits[m]} (Compensatory - Previous Month Credit)` : ''
+    }));
+    console.log('🔍 DEBUG - Final rows with extraCredit:', JSON.stringify(rows, null, 2));
     return rows;
+    } catch (error) {
+      console.error('🚨 ERROR in getMonthlyLedger:', error);
+      console.error('🚨 ERROR Stack:', error.stack);
+      throw error;
+    }
   }
 }
