@@ -11,6 +11,7 @@ import {
   Request,
   HttpStatus,
   HttpCode,
+  BadRequestException,
 } from '@nestjs/common';
 import { Logger } from '@nestjs/common';
 import {
@@ -130,6 +131,10 @@ export class LeaveController {
     description: 'Leave balance retrieved successfully',
   })
   async getLeaveBalance(@Request() req: { user: AuthUser }) {
+    console.log('🔍 DEBUG getLeaveBalance - req.user:', JSON.stringify(req.user, null, 2));
+    if (!req.user.employeeId) {
+      throw new BadRequestException('Employee ID not found in token. Please re-login.');
+    }
     return this.leaveService.getLeaveBalance(req.user.employeeId);
   }
 
@@ -226,8 +231,13 @@ export class LeaveController {
     @Query('to') to?: string,
     @Query('employeeId') employeeId?: string,
   ) {
+    console.log('🔍 DEBUG getMonthlyLedger - req.user:', JSON.stringify(req.user, null, 2));
     // Admin can query any employeeId; others default to self
     const targetEmployeeId = req.user.role === 'admin' && employeeId ? employeeId : req.user.employeeId;
+    console.log('🔍 DEBUG getMonthlyLedger - targetEmployeeId:', targetEmployeeId);
+    if (!targetEmployeeId) {
+      throw new BadRequestException('Employee ID not found in token. Please re-login.');
+    }
     return this.leaveService.getMonthlyLedger(targetEmployeeId, from, to);
   }
 

@@ -38,6 +38,7 @@ export class LeaveService {
     private leaveCreditModel: typeof LeaveCredit,
     @InjectModel(LeaveCreditConfig)
     private leaveCreditConfigModel: typeof LeaveCreditConfig,
+    private compensatoryLeaveService: CompensatoryLeaveService,
   ) {}
 
   async createLeaveRequest(employeeId: string, createLeaveDto: CreateLeaveDto) {
@@ -139,7 +140,23 @@ export class LeaveService {
 
     if (userRole === 'employee') {
       // Employee can only see their own requests
-      whereClause.employeeId = employeeId;
+      // Convert string employeeId to UUID for database query
+      let employee = await this.employeeModel.findOne({
+        where: { employeeId },
+        attributes: ['id'],
+      });
+
+      // If not found by employeeId string, try by UUID (fallback)
+      if (!employee && employeeId) {
+        employee = await this.employeeModel.findOne({
+          where: { id: employeeId },
+          attributes: ['id'],
+        });
+      }
+
+      if (employee) {
+        whereClause.employeeId = employee.id; // Use UUID for database query
+      }
     } else if (userRole === 'admin') {
       // Admin can see all requests
       whereClause = {};
@@ -533,14 +550,22 @@ export class LeaveService {
   }
 
   async getLeaveBalance(employeeId: string) {
-    // Get employee details first
-    const employee = await this.employeeModel.findOne({
+    // Get employee details first - handle both string employeeId and UUID lookups
+    let employee = await this.employeeModel.findOne({
       where: { employeeId },
-      attributes: ['employeeId', 'name', 'joiningDate'],
+      attributes: ['id', 'employeeId', 'name', 'joiningDate'],
     });
 
+    // If not found by employeeId string, try by UUID (fallback)
+    if (!employee && employeeId) {
+      employee = await this.employeeModel.findOne({
+        where: { id: employeeId },
+        attributes: ['id', 'employeeId', 'name', 'joiningDate'],
+      });
+    }
+
     if (!employee) {
-      throw new NotFoundException('Employee not found');
+      throw new NotFoundException(`Employee not found with ID: ${employeeId}`);
     }
 
     // Get all leave types (hardcoded for now, will be dynamic when LeaveTypes module is added)
@@ -582,7 +607,7 @@ export class LeaveService {
     // Get approved leaves for the current year
     const approvedLeaves = await this.leaveRequestModel.findAll({
       where: {
-        employeeId,
+        employeeId: employee.id, // Use UUID instead of string employeeId
         status: 'approved',
       },
       attributes: ['leaveType', 'startDate', 'endDate'],
@@ -746,7 +771,23 @@ export class LeaveService {
     const whereClause: Record<string, unknown> = {};
 
     if (employeeId) {
-      whereClause.employeeId = employeeId;
+      // Convert string employeeId to UUID for database query
+      let employee = await this.employeeModel.findOne({
+        where: { employeeId },
+        attributes: ['id'],
+      });
+
+      // If not found by employeeId string, try by UUID (fallback)
+      if (!employee && employeeId) {
+        employee = await this.employeeModel.findOne({
+          where: { id: employeeId },
+          attributes: ['id'],
+        });
+      }
+
+      if (employee) {
+        whereClause.employeeId = employee.id; // Use UUID for database query
+      }
     }
 
     const [total, pending, approved, rejected] = await Promise.all([
@@ -772,6 +813,7 @@ export class LeaveService {
 
   // Compute monthly deducted (paid leave) and LWP for a date range
   async getMonthlyLedger(employeeId: string, from?: string, to?: string) {
+    try {
     const now = new Date();
     const defaultFrom = new Date(now.getFullYear(), 0, 1); // Jan 1 current year
     const defaultTo = new Date(now.getFullYear(), now.getMonth(), 1); // cap at current month start
@@ -783,10 +825,148 @@ export class LeaveService {
     // IMPORTANT: For DB filtering, include the ENTIRE capped end month
     const endBoundary = new Date(end.getFullYear(), end.getMonth() + 1, 0, 23, 59, 59, 999);
 
+    // Get employee to find associated user
+    // Handle both string employeeId and UUID lookups for compatibility
+    let employee = await this.employeeModel.findOne({
+      where: { employeeId },
+      include: [{ model: User, as: 'user' }]
+    });
+
+    // If not found by employeeId string, try by UUID (fallback)
+    if (!employee && employeeId) {
+      employee = await this.employeeModel.findOne({
+        where: { id: employeeId },
+        include: [{ model: User, as: 'user' }]
+      });
+    }
+
+    if (!employee) {
+      throw new Error(`Employee not found with ID: ${employeeId}`);
+    }
+
+    let compensatoryCredits: Record<string, number> = {};
+    if (employee?.user) {
+      console.log('🔍 DEBUG - Employee found:', {
+        employeeId: employee.employeeId,
+        employeeName: employee.name,
+        userId: employee.user.id,
+        userEmail: employee.user.email
+      });
+      try {
+        // Fetch compensatory leave credits by assigned month for the date range
+        const compensatoryLeaves = await this.compensatoryLeaveService.findByUserId(
+          employee.user.id, // Use UUID string directly
+          'active' as any
+        );
+        console.log('🔍 DEBUG - Compensatory leaves found:', compensatoryLeaves.length);
+        console.log('🔍 DEBUG - Compensatory leaves data:', JSON.stringify(compensatoryLeaves, null, 2));
+
+      // Group compensatory credits by assigned month
+      // Credits are applied to the month BEFORE the assigned month
+      compensatoryLeaves.forEach((credit: any) => {
+        try {
+          console.log('🔍 DEBUG - Full credit object keys:', Object.keys(credit));
+          console.log('🔍 DEBUG - Raw assignedDate from DB:', credit.assignedDate);
+          console.log('🔍 DEBUG - Raw assigned_date from DB:', credit.assigned_date);
+          console.log('🔍 DEBUG - Credit dataValues:', credit.dataValues);
+          
+          // Try different possible field names
+          const assignedDateValue = credit.assignedDate || credit.assigned_date || credit.dataValues?.assignedDate || credit.dataValues?.assigned_date;
+          console.log('🔍 DEBUG - Final assignedDateValue:', assignedDateValue);
+          
+          let assignedDate: Date;
+          if (!assignedDateValue) {
+            console.error('🚨 ERROR - No assignedDate found in any format, using current month middle');
+            // Fallback: use middle of current month as you suggested
+            const now = new Date();
+            assignedDate = new Date(now.getFullYear(), now.getMonth(), 15); // 15th of current month
+            console.log('🔍 DEBUG - Using fallback assignedDate:', assignedDate);
+          } else {
+            assignedDate = new Date(assignedDateValue);
+          }
+          console.log('🔍 DEBUG - Parsed assignedDate:', assignedDate);
+          
+          // Check if assignedDate is valid
+          if (isNaN(assignedDate.getTime())) {
+            console.error('🚨 ERROR - Invalid assignedDate:', credit.assignedDate);
+            return; // Skip this credit
+          }
+          
+          // Calculate the previous month from assigned date (safer approach)
+          const assignedYear = assignedDate.getFullYear();
+          const assignedMonth = assignedDate.getMonth();
+          
+          console.log('🔍 DEBUG - Assigned year/month:', assignedYear, assignedMonth);
+          
+          // Calculate previous month and year
+          let previousYear = assignedYear;
+          let previousMonthIndex = assignedMonth - 1;
+          
+          // Handle year rollover (January -> December of previous year)
+          if (previousMonthIndex < 0) {
+            previousMonthIndex = 11; // December
+            previousYear = assignedYear - 1;
+          }
+          
+          console.log('🔍 DEBUG - Previous year/month:', previousYear, previousMonthIndex);
+          
+          // Create previous month date safely (use day 1 to avoid invalid dates)
+          const previousMonth = new Date(previousYear, previousMonthIndex, 1);
+          
+          console.log('🔍 DEBUG - Previous month date:', previousMonth);
+          
+          // Check if previousMonth is valid
+          if (isNaN(previousMonth.getTime())) {
+            console.error('🚨 ERROR - Invalid previousMonth date');
+            return; // Skip this credit
+          }
+          
+          const yearMonth = `${previousYear}-${String(previousMonthIndex + 1).padStart(2, '0')}`;
+          
+          // Only include credits within the requested date range (check both assigned and credited month)
+          const creditedDate = previousMonth;
+          // Try different ways to access credits field
+          const creditsValue = credit.credits || credit.dataValues?.credits || 0;
+          console.log('🔍 DEBUG - Raw credits from DB:', credit.credits);
+          console.log('🔍 DEBUG - Credits from dataValues:', credit.dataValues?.credits);
+          console.log('🔍 DEBUG - Final creditsValue:', creditsValue);
+          
+          console.log('🔍 DEBUG - Processing credit:', {
+            assignedDate: assignedDate.toISOString(),
+            creditedDate: creditedDate.toISOString(),
+            yearMonth,
+            credits: creditsValue,
+            dateRangeStart: start.toISOString(),
+            dateRangeEnd: endBoundary.toISOString(),
+            assignedInRange: assignedDate >= start && assignedDate <= endBoundary,
+            creditedInRange: creditedDate >= start && creditedDate <= endBoundary
+          });
+          
+          // Check if credit should be included in the date range
+          if ((assignedDate >= start && assignedDate <= endBoundary) || 
+              (creditedDate >= start && creditedDate <= endBoundary)) {
+            compensatoryCredits[yearMonth] = (compensatoryCredits[yearMonth] || 0) + Number(creditsValue);
+            console.log('🔍 DEBUG - Credit added to month:', yearMonth, 'Total:', compensatoryCredits[yearMonth]);
+          } else {
+            console.log('🔍 DEBUG - Credit NOT in date range, skipping');
+          }
+        } catch (dateError) {
+          console.error('🚨 ERROR in date processing for credit:', credit.id, dateError);
+          return; // Skip this credit
+        }
+      });
+      } catch (compensatoryError) {
+        console.error('🚨 ERROR fetching compensatory leave credits:', compensatoryError);
+        // Continue without compensatory credits if service fails
+        compensatoryCredits = {};
+      }
+    }
+
     // Fetch approved leaves for employee intersecting the window (quick filter by year span)
+    // Use the employee's UUID for the database query, not the string employeeId
     const approved = await this.leaveRequestModel.findAll({
       where: {
-        employeeId,
+        employeeId: employee.id, // Use UUID instead of string employeeId
         status: 'approved',
         // broad filter by dates overlapping range
         [Op.or]: [
@@ -888,7 +1068,20 @@ export class LeaveService {
     }
 
     // Build rows in order of months with zeros where missing
-    const rows = months.map((m) => ({ ym: m, deducted: Number(deducted[m] || 0), lwp: Number(lwp[m] || 0) }));
+    console.log('🔍 DEBUG - Final compensatoryCredits object:', compensatoryCredits);
+    const rows = months.map((m) => ({ 
+      ym: m, 
+      deducted: Number(deducted[m] || 0), 
+      lwp: Number(lwp[m] || 0),
+      extraCredit: Number(compensatoryCredits[m] || 0),
+      extraCreditBreakdown: compensatoryCredits[m] ? `${compensatoryCredits[m]} (Compensatory - Previous Month Credit)` : ''
+    }));
+    console.log('🔍 DEBUG - Final rows with extraCredit:', JSON.stringify(rows, null, 2));
     return rows;
+    } catch (error) {
+      console.error('🚨 ERROR in getMonthlyLedger:', error);
+      console.error('🚨 ERROR Stack:', error.stack);
+      throw error;
+    }
   }
 }

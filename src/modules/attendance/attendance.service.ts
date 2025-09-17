@@ -936,21 +936,68 @@ export class AttendanceService {
     from?: string,
     to?: string,
   ) {
-    const whereClause: any = { employeeId };
+    console.log('🔍 DEBUG getEmployeeAttendanceSummary - targetEmployeeId:', employeeId);
     
-    if (from && to) {
-      whereClause.date = { [Op.between]: [from, to] };
-    } else if (from) {
-      whereClause.date = { [Op.gte]: from };
-    } else if (to) {
-      whereClause.date = { [Op.lte]: to };
+    // Find employee to get associated user (same pattern as leave service)
+    let employee;
+    try {
+      // Try to find by employeeId (string) first
+      employee = await this.employeeModel.findOne({
+        where: { employeeId },
+        include: [{ model: User, as: 'user' }]
+      });
+    } catch (error) {
+      console.error('🚨 ERROR finding employee by employeeId:', error);
     }
+
+    if (!employee) {
+      // Fallback: try to find by UUID if the employeeId looks like a UUID
+      try {
+        employee = await this.employeeModel.findOne({
+          where: { id: employeeId },
+          include: [{ model: User, as: 'user' }]
+        });
+      } catch (error) {
+        console.error('🚨 ERROR finding employee by UUID:', error);
+      }
+    }
+
+    if (!employee) {
+      throw new NotFoundException(`Employee not found with ID: ${employeeId}`);
+    }
+
+    console.log('🔍 DEBUG - Employee found:', {
+      employeeId: employee.employeeId,
+      employeeName: employee.name,
+      userId: employee.user?.id,
+      userEmail: employee.user?.email
+    });
+
+    // Build date filter
+    const dateFilter: any = {};
+    if (from && to) {
+      dateFilter.date = { [Op.between]: [from, to] };
+    } else if (from) {
+      dateFilter.date = { [Op.gte]: from };
+    } else if (to) {
+      dateFilter.date = { [Op.lte]: to };
+    }
+
+    // Query attendance using userId (UUID) instead of employeeId (string)
+    const whereClause: any = {
+      userId: employee.user?.id,
+      ...dateFilter
+    };
+
+    console.log('🔍 DEBUG - Query whereClause:', whereClause);
 
     // Get all attendance records for the employee
     const attendanceRecords = await this.attendanceModel.findAll({
       where: whereClause,
       attributes: ['date', 'status', 'checkIn'],
     });
+
+    console.log('🔍 DEBUG - Attendance records found:', attendanceRecords.length);
 
     // Count present days (including late)
     const presentDays = attendanceRecords.filter(

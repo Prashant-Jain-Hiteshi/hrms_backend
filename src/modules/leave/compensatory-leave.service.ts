@@ -128,7 +128,7 @@ export class CompensatoryLeaveService {
     return compensatoryLeave;
   }
 
-  async findByUserId(userId: number, status?: CompensatoryLeaveStatus): Promise<CompensatoryLeave[]> {
+  async findByUserId(userId: string, status?: CompensatoryLeaveStatus): Promise<CompensatoryLeave[]> {
     const whereClause: any = { userId };
     
     if (status) {
