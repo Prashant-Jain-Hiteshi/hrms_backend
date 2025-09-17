@@ -1273,17 +1273,46 @@ export class AttendanceService {
       console.log('🔍 DEBUG: addEmployeeAttendance called with:', { attendanceData, user });
       const { employeeId, date, checkIn, checkOut, description } = attendanceData;
 
-      // Validate employee exists
+      // Validate employee exists - handle both string employeeId and UUID lookups
       console.log('🔍 DEBUG: Looking for employee with ID:', employeeId);
-      const employee = await this.employeeModel.findByPk(employeeId);
-    if (!employee) {
-      throw new BadRequestException('Employee not found');
-    }
+      let employee;
+      try {
+        // Try to find by employeeId (string) first
+        employee = await this.employeeModel.findOne({
+          where: { employeeId },
+          include: [{ model: User, as: 'user' }]
+        });
+      } catch (error) {
+        console.error('🚨 ERROR finding employee by employeeId:', error);
+      }
+
+      if (!employee) {
+        // Fallback: try to find by UUID if the employeeId looks like a UUID
+        try {
+          employee = await this.employeeModel.findOne({
+            where: { id: employeeId },
+            include: [{ model: User, as: 'user' }]
+          });
+        } catch (error) {
+          console.error('🚨 ERROR finding employee by UUID:', error);
+        }
+      }
+
+      if (!employee) {
+        throw new BadRequestException(`Employee not found with ID: ${employeeId}`);
+      }
+
+      console.log('🔍 DEBUG - Employee found:', {
+        employeeId: employee.employeeId,
+        employeeName: employee.name,
+        userId: employee.user?.id,
+        userEmail: employee.user?.email
+      });
 
     // Check if attendance record already exists for this date
     const existingRecord = await this.attendanceModel.findOne({
       where: {
-        employeeId,
+        userId: employee.user?.id, // Use UUID instead of string employeeId
         date,
       },
     });
@@ -1322,8 +1351,8 @@ export class AttendanceService {
 
     // Create attendance record
     const attendanceRecord = await this.attendanceModel.create({
-      employeeId,
-      userId: user.id, // Fix: Add the missing userId field
+      employeeId: employee.id, // Use employee UUID, not string employeeId
+      userId: employee.user?.id, // Use employee's user UUID
       date,
       checkIn,
       checkOut: checkOut || null,
@@ -1332,13 +1361,18 @@ export class AttendanceService {
       notes: description || `Added by ${user.role.toUpperCase()}: ${user.id}`,
     });
 
+    console.log('🔍 DEBUG - Attendance record created:', {
+      id: attendanceRecord.id,
+      employeeId: attendanceRecord.employeeId,
+      userId: attendanceRecord.userId,
+      date: attendanceRecord.date
+    });
+
     // Create session record to match the behavior of employee self-punch
     // This ensures the attendance details popup shows session information
-    // For HR/Admin added attendance, we'll use the employeeId as userId in sessions
-    // The adminStatus method has been updated to handle this case
     const sessionData: any = {
       attendanceId: attendanceRecord.id,
-      userId: employeeId, // Use employeeId as userId for HR/Admin added sessions
+      userId: employee.user?.id, // Use employee's user UUID, not string employeeId
       date,
       startTime: checkIn,
     };
