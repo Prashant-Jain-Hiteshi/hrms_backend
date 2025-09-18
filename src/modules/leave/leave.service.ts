@@ -718,23 +718,72 @@ export class LeaveService {
     }
 
     const now = new Date();
-    const currentYear = now.getFullYear();
-    const startOfYear = new Date(currentYear, 0, 1);
     const doj = new Date(employee.joiningDate as unknown as string);
-    // Accrual begins from the later of DOJ month start or Jan 1 of current year
-    const joiningMonthStart = new Date(doj.getFullYear(), doj.getMonth(), 1);
-    const accrualStart = joiningMonthStart > startOfYear ? joiningMonthStart : startOfYear;
+    
+    // Calculate eligible months from joining date to current month (including partial months)
+    const calculateEligibleMonths = () => {
+      // If DOJ is in the future, return 0
+      if (doj > now) return 0;
+      
+      const startYear = doj.getFullYear();
+      const startMonth = doj.getMonth();
+      const startDay = doj.getDate();
+      
+      const endYear = now.getFullYear();
+      const endMonth = now.getMonth();
+      const endDay = now.getDate();
+      
+      // Calculate total months between dates
+      let totalMonths = (endYear - startYear) * 12 + (endMonth - startMonth);
+      
+      // Add partial month calculation for mid-month joining
+      // If joined mid-month, calculate the fraction of the first month
+      const daysInJoiningMonth = new Date(startYear, startMonth + 1, 0).getDate();
+      const daysWorkedInJoiningMonth = daysInJoiningMonth - startDay + 1;
+      const joiningMonthFraction = daysWorkedInJoiningMonth / daysInJoiningMonth;
+      
+      // Add partial month calculation for current month
+      const daysInCurrentMonth = new Date(endYear, endMonth + 1, 0).getDate();
+      const daysWorkedInCurrentMonth = endDay;
+      const currentMonthFraction = daysWorkedInCurrentMonth / daysInCurrentMonth;
+      
+      // If same month, just calculate the fraction
+      if (startYear === endYear && startMonth === endMonth) {
+        const daysWorked = endDay - startDay + 1;
+        return daysWorked / daysInJoiningMonth;
+      }
+      
+      // Calculate total eligible months with fractions
+      let eligibleMonths = 0;
+      
+      // Add joining month fraction
+      eligibleMonths += joiningMonthFraction;
+      
+      // Add complete months in between
+      if (totalMonths > 1) {
+        eligibleMonths += (totalMonths - 1);
+      }
+      
+      // Add current month fraction (if different from joining month)
+      if (totalMonths > 0) {
+        eligibleMonths += currentMonthFraction;
+      }
+      
+      return Math.max(0, eligibleMonths);
+    };
 
-    // Calculate eligible months from accrualStart to current month inclusive
-    const monthsEligible = (() => {
-      // If DOJ is in the future relative to now within the same year, zero
-      if (accrualStart > now) return 0;
-      const startY = accrualStart.getFullYear();
-      const startM = accrualStart.getMonth();
-      const endY = now.getFullYear();
-      const endM = now.getMonth();
-      return (endY - startY) * 12 + (endM - startM) + 1; // inclusive months
-    })();
+    const monthsEligible = calculateEligibleMonths();
+    
+    // Custom rounding function to round to nearest 0.5
+    const roundToHalf = (value: number): number => {
+      return Math.floor(value * 2) / 2;
+    };
+    
+    console.log(`🔍 DEBUG - Employee ${employee.employeeId} joining calculation:`, {
+      joiningDate: doj.toISOString().split('T')[0],
+      currentDate: now.toISOString().split('T')[0],
+      monthsEligible: monthsEligible.toFixed(2)
+    });
 
     // Note: configs already fetched above for leave types calculation
 
@@ -755,6 +804,33 @@ export class LeaveService {
 
     leaveTypes.forEach((leaveType) => {
       const typeName = leaveType.name.toLowerCase().replace(/\s+/g, '');
+      
+      // Find corresponding config for this leave type to get monthly credit
+      const config = configs.find(c => 
+        c.leaveType.toLowerCase().replace(/\s+/g, '') === typeName ||
+        c.leaveType.toLowerCase() === leaveType.name.toLowerCase()
+      );
+      
+      // Calculate pro-rated total based on eligible months
+      let proRatedTotal: number;
+      
+      if (config && config.monthlyCredit) {
+        // Use monthly credit for pro-ration calculation
+        const calculatedTotal = config.monthlyCredit * monthsEligible;
+        proRatedTotal = roundToHalf(calculatedTotal); // Apply custom rounding
+        console.log(`🔍 DEBUG - ${leaveType.name} pro-ration:`, {
+          monthlyCredit: config.monthlyCredit,
+          monthsEligible: monthsEligible.toFixed(2),
+          calculatedTotal: calculatedTotal.toFixed(2),
+          proRatedTotal: proRatedTotal
+        });
+      } else {
+        // For leave types without monthly credits (Maternity/Paternity), use full allocation
+        proRatedTotal = leaveType.numberOfLeaves;
+        console.log(`🔍 DEBUG - ${leaveType.name} full allocation (no monthly credit):`, proRatedTotal);
+      }
+      
+      // Filter approved leaves for this leave type
       const typeLeaves = approvedLeaves.filter((leave) => {
         const leaveTypeName = leave.leaveType.toLowerCase().replace(/\s+/g, '');
         return (
@@ -763,6 +839,7 @@ export class LeaveService {
         );
       });
 
+      // Calculate used days
       const usedDays = typeLeaves.reduce((total, leave) => {
         const startDate = new Date(leave.startDate);
         const endDate = new Date(leave.endDate);
@@ -772,9 +849,9 @@ export class LeaveService {
       }, 0);
 
       balance[typeName] = {
-        total: leaveType.numberOfLeaves,
+        total: proRatedTotal, // Already rounded to nearest 0.5
         used: usedDays,
-        remaining: Math.max(0, leaveType.numberOfLeaves - usedDays),
+        remaining: Math.max(0, roundToHalf(proRatedTotal - usedDays)), // Apply rounding to remaining as well
         displayName: leaveType.name,
       };
     });
