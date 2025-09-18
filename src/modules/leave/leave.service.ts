@@ -54,6 +54,27 @@ export class LeaveService {
     );
 
     try {
+      // First, get the requesting employee's UUID
+      let requestingEmployee = await this.employeeModel.findOne({
+        where: { employeeId },
+        attributes: ['id'],
+      });
+
+      // If not found by employeeId string, try by UUID (fallback)
+      if (!requestingEmployee && employeeId) {
+        requestingEmployee = await this.employeeModel.findOne({
+          where: { id: employeeId },
+          attributes: ['id'],
+        });
+      }
+
+      if (!requestingEmployee) {
+        this.logger.warn(`Requesting employee not found: ${employeeId}`);
+        throw new BadRequestException('Requesting employee not found');
+      }
+
+      const requestingEmployeeUuid = requestingEmployee.id;
+
       // Validate TO employees exist
       const toEmployeesExist = await this.employeeModel.findAll({
         where: { id: { [Op.in]: toEmployees } },
@@ -80,10 +101,10 @@ export class LeaveService {
         }
       }
 
-      // Create leave request
+      // Create leave request using UUID
       const leaveRequest = await this.leaveRequestModel.create({
         ...leaveData,
-        employeeId,
+        employeeId: requestingEmployeeUuid, // Use UUID instead of string
         status: 'pending',
       });
 
@@ -110,7 +131,7 @@ export class LeaveService {
       const statusHistoryPromise = this.leaveStatusHistoryModel.create({
         leaveRequestId: leaveRequest.id,
         status: 'pending',
-        changedBy: employeeId,
+        changedBy: requestingEmployeeUuid, // Use UUID instead of string
         changedAt: new Date(),
         comments: 'Leave request submitted',
       });
@@ -204,6 +225,27 @@ export class LeaveService {
     // Union of requests where user is approver (TO) or in CC, for ALL statuses
     this.logger.log(`GET /leave/mentions | employeeId=${employeeId}`);
     try {
+      // Find employee to get UUID for database queries
+      let employee = await this.employeeModel.findOne({
+        where: { employeeId },
+        attributes: ['id'],
+      });
+
+      // If not found by employeeId string, try by UUID (fallback)
+      if (!employee && employeeId) {
+        employee = await this.employeeModel.findOne({
+          where: { id: employeeId },
+          attributes: ['id'],
+        });
+      }
+
+      if (!employee) {
+        this.logger.warn(`Employee not found with ID: ${employeeId}`);
+        return []; // Return empty array if employee not found
+      }
+
+      const employeeUuid = employee.id;
+
       const [asApprover, asCc] = await Promise.all([
         this.leaveRequestModel.findAll({
           include: [
@@ -215,7 +257,7 @@ export class LeaveService {
             {
               model: LeaveApprover,
               as: 'toEmployees',
-              where: { employeeId },
+              where: { employeeId: employeeUuid }, // Use UUID instead of string
               include: [
                 {
                   model: Employee,
@@ -256,7 +298,7 @@ export class LeaveService {
             {
               model: LeaveCc,
               as: 'ccEmployees',
-              where: { employeeId },
+              where: { employeeId: employeeUuid }, // Use UUID instead of string
               include: [
                 {
                   model: Employee,
@@ -293,6 +335,26 @@ export class LeaveService {
 
   async getLeaveRequestsForApproval(approverId: string) {
     // Get leave requests where user is in TO list
+    // Find employee to get UUID for database queries
+    let employee = await this.employeeModel.findOne({
+      where: { employeeId: approverId },
+      attributes: ['id'],
+    });
+
+    // If not found by employeeId string, try by UUID (fallback)
+    if (!employee && approverId) {
+      employee = await this.employeeModel.findOne({
+        where: { id: approverId },
+        attributes: ['id'],
+      });
+    }
+
+    if (!employee) {
+      return []; // Return empty array if employee not found
+    }
+
+    const employeeUuid = employee.id;
+
     return this.leaveRequestModel.findAll({
       include: [
         {
@@ -303,7 +365,7 @@ export class LeaveService {
         {
           model: LeaveApprover,
           as: 'toEmployees',
-          where: { employeeId: approverId, status: 'pending' },
+          where: { employeeId: employeeUuid, status: 'pending' }, // Use UUID instead of string
           include: [
             {
               model: Employee,
@@ -329,6 +391,26 @@ export class LeaveService {
 
   async getLeaveRequestsForCC(ccEmployeeId: string) {
     // Get leave requests where user is in CC list
+    // Find employee to get UUID for database queries
+    let employee = await this.employeeModel.findOne({
+      where: { employeeId: ccEmployeeId },
+      attributes: ['id'],
+    });
+
+    // If not found by employeeId string, try by UUID (fallback)
+    if (!employee && ccEmployeeId) {
+      employee = await this.employeeModel.findOne({
+        where: { id: ccEmployeeId },
+        attributes: ['id'],
+      });
+    }
+
+    if (!employee) {
+      return []; // Return empty array if employee not found
+    }
+
+    const employeeUuid = employee.id;
+
     return this.leaveRequestModel.findAll({
       include: [
         {
@@ -349,7 +431,7 @@ export class LeaveService {
         {
           model: LeaveCc,
           as: 'ccEmployees',
-          where: { employeeId: ccEmployeeId },
+          where: { employeeId: employeeUuid }, // Use UUID instead of string
           include: [
             {
               model: Employee,
@@ -424,11 +506,31 @@ export class LeaveService {
   ) {
     const leaveRequest = await this.getLeaveRequestById(leaveRequestId);
 
+    // Convert string approverId to UUID for database query
+    let approverEmployee = await this.employeeModel.findOne({
+      where: { employeeId: approverId },
+      attributes: ['id'],
+    });
+
+    // If not found by employeeId string, try by UUID (fallback)
+    if (!approverEmployee && approverId) {
+      approverEmployee = await this.employeeModel.findOne({
+        where: { id: approverId },
+        attributes: ['id'],
+      });
+    }
+
+    if (!approverEmployee) {
+      throw new ForbiddenException('Approver employee not found');
+    }
+
+    const approverUuid = approverEmployee.id;
+
     // Check if user is authorized to approve this request
     const approver = await this.leaveApproverModel.findOne({
       where: {
         leaveRequestId,
-        employeeId: approverId,
+        employeeId: approverUuid, // Use UUID instead of string
         status: 'pending',
       },
     });
@@ -442,7 +544,7 @@ export class LeaveService {
     // Update leave request status
     await leaveRequest.update({
       status: updateStatusDto.status,
-      approvedBy: approverId,
+      approvedBy: approverUuid, // Use UUID instead of string
       approvedAt: new Date(),
       comments: updateStatusDto.comments,
     });
@@ -458,7 +560,7 @@ export class LeaveService {
     await this.leaveStatusHistoryModel.create({
       leaveRequestId,
       status: updateStatusDto.status,
-      changedBy: approverId,
+      changedBy: approverUuid, // Use UUID instead of string
       changedAt: new Date(),
       comments: updateStatusDto.comments || `Leave ${updateStatusDto.status}`,
     });
@@ -467,10 +569,30 @@ export class LeaveService {
   }
 
   async markCCAsRead(leaveRequestId: string, ccEmployeeId: string) {
+    // Convert string ccEmployeeId to UUID for database query
+    let ccEmployee = await this.employeeModel.findOne({
+      where: { employeeId: ccEmployeeId },
+      attributes: ['id'],
+    });
+
+    // If not found by employeeId string, try by UUID (fallback)
+    if (!ccEmployee && ccEmployeeId) {
+      ccEmployee = await this.employeeModel.findOne({
+        where: { id: ccEmployeeId },
+        attributes: ['id'],
+      });
+    }
+
+    if (!ccEmployee) {
+      throw new NotFoundException('CC employee not found');
+    }
+
+    const ccEmployeeUuid = ccEmployee.id;
+
     const ccEntry = await this.leaveCcModel.findOne({
       where: {
         leaveRequestId,
-        employeeId: ccEmployeeId,
+        employeeId: ccEmployeeUuid, // Use UUID instead of string
       },
     });
 
@@ -568,22 +690,40 @@ export class LeaveService {
       throw new NotFoundException(`Employee not found with ID: ${employeeId}`);
     }
 
-    // Get all leave types (hardcoded for now, will be dynamic when LeaveTypes module is added)
-    const leaveTypes = [
-      { name: 'Annual Leave', numberOfLeaves: 20 },
-      { name: 'Sick Leave', numberOfLeaves: 10 },
-      { name: 'Casual Leave', numberOfLeaves: 5 },
-      { name: 'Maternity Leave', numberOfLeaves: 90 },
-      { name: 'Paternity Leave', numberOfLeaves: 15 },
-      { name: 'Emergency Leave', numberOfLeaves: 3 },
-    ];
+    // Get active credit configs (dynamic leave types configured by admin)
+    const configs = await this.leaveCreditConfigModel.findAll({
+      where: { isActive: true },
+      attributes: ['leaveType', 'monthlyCredit', 'maxAnnualLimit'],
+      raw: true,
+      order: [['leaveType', 'ASC']],
+    });
+
+    // Convert configs to leave types format with calculated annual limits
+    const leaveTypes = configs.map(config => ({
+      name: config.leaveType,
+      numberOfLeaves: config.maxAnnualLimit || (config.monthlyCredit * 12), // Use maxAnnualLimit or calculate from monthly
+    }));
+
+    // Fallback to hardcoded values only if no configs are found
+    if (leaveTypes.length === 0) {
+      console.warn('No active leave credit configs found, using fallback hardcoded values');
+      leaveTypes.push(
+        { name: 'Annual Leave', numberOfLeaves: 20 },
+        { name: 'Sick Leave', numberOfLeaves: 10 },
+        { name: 'Casual Leave', numberOfLeaves: 5 },
+        { name: 'Maternity Leave', numberOfLeaves: 90 },
+        { name: 'Paternity Leave', numberOfLeaves: 15 },
+        { name: 'Emergency Leave', numberOfLeaves: 3 },
+      );
+    }
 
     const now = new Date();
     const currentYear = now.getFullYear();
     const startOfYear = new Date(currentYear, 0, 1);
     const doj = new Date(employee.joiningDate as unknown as string);
-    // Accrual begins from the later of DOJ or Jan 1 of current year
-    const accrualStart = doj > startOfYear ? new Date(doj.getFullYear(), doj.getMonth(), 1) : startOfYear;
+    // Accrual begins from the later of DOJ month start or Jan 1 of current year
+    const joiningMonthStart = new Date(doj.getFullYear(), doj.getMonth(), 1);
+    const accrualStart = joiningMonthStart > startOfYear ? joiningMonthStart : startOfYear;
 
     // Calculate eligible months from accrualStart to current month inclusive
     const monthsEligible = (() => {
@@ -596,13 +736,7 @@ export class LeaveService {
       return (endY - startY) * 12 + (endM - startM) + 1; // inclusive months
     })();
 
-    // 2) Get active credit configs
-    const configs = await this.leaveCreditConfigModel.findAll({
-      where: { isActive: true },
-      attributes: ['leaveType', 'monthlyCredit', 'maxAnnualLimit'],
-      raw: true,
-      order: [['leaveType', 'ASC']],
-    });
+    // Note: configs already fetched above for leave types calculation
 
     // Get approved leaves for the current year
     const approvedLeaves = await this.leaveRequestModel.findAll({
@@ -825,24 +959,42 @@ export class LeaveService {
     // IMPORTANT: For DB filtering, include the ENTIRE capped end month
     const endBoundary = new Date(end.getFullYear(), end.getMonth() + 1, 0, 23, 59, 59, 999);
 
-    // Get employee to find associated user
+    // Get employee to find associated user and joining date
     // Handle both string employeeId and UUID lookups for compatibility
     let employee = await this.employeeModel.findOne({
       where: { employeeId },
-      include: [{ model: User, as: 'user' }]
+      include: [{ model: User, as: 'user' }],
+      attributes: ['id', 'employeeId', 'name', 'joiningDate']
     });
 
     // If not found by employeeId string, try by UUID (fallback)
     if (!employee && employeeId) {
       employee = await this.employeeModel.findOne({
         where: { id: employeeId },
-        include: [{ model: User, as: 'user' }]
+        include: [{ model: User, as: 'user' }],
+        attributes: ['id', 'employeeId', 'name', 'joiningDate']
       });
     }
 
     if (!employee) {
       throw new Error(`Employee not found with ID: ${employeeId}`);
     }
+
+    // Get employee joining date to determine when leave credits should start
+    const joiningDateStr = employee.joiningDate as unknown as string;
+    const joiningDate = new Date(joiningDateStr);
+    
+    // Create joining month start in UTC to avoid timezone issues
+    const joiningMonthStart = new Date(Date.UTC(joiningDate.getFullYear(), joiningDate.getMonth(), 1));
+    
+    console.log('🔍 DEBUG - Employee joining info:', {
+      employeeId: employee.employeeId,
+      joiningDateStr: joiningDateStr,
+      joiningDate: joiningDate.toISOString(),
+      joiningMonthStart: joiningMonthStart.toISOString(),
+      joiningYear: joiningDate.getFullYear(),
+      joiningMonth: joiningDate.getMonth() + 1
+    });
 
     let compensatoryCredits: Record<string, number> = {};
     if (employee?.user) {
@@ -983,15 +1135,27 @@ export class LeaveService {
     const ym = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
     const addMonths = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth()+n, 1);
 
-    // Initialize months map from start..end inclusive
+    // Initialize months map from start..end inclusive, but not before joining date
     const months: string[] = [];
     {
-      const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+      // Start from the later of: requested start date OR employee joining month
+      const effectiveStart = start > joiningMonthStart ? start : joiningMonthStart;
+      const cursor = new Date(effectiveStart.getFullYear(), effectiveStart.getMonth(), 1);
       const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+      
+      console.log('🔍 DEBUG - Month range calculation:', {
+        requestedStart: start.toISOString(),
+        joiningMonthStart: joiningMonthStart.toISOString(),
+        effectiveStart: effectiveStart.toISOString(),
+        endMonth: endMonth.toISOString()
+      });
+      
       while (cursor <= endMonth) {
         months.push(ym(cursor));
         cursor.setMonth(cursor.getMonth()+1);
       }
+      
+      console.log('🔍 DEBUG - Generated months:', months);
     }
 
     const deducted: Record<string, number> = {};
