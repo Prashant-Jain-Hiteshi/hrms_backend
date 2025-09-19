@@ -25,6 +25,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { LeaveService } from './leave.service';
 import { CreateLeaveDto, UpdateLeaveStatusDto } from './dto/create-leave.dto';
+import { TenantId, CompanyCode } from '../../common/decorators/tenant.decorator';
 
 type AuthUser = {
   id: string;
@@ -143,16 +144,19 @@ export class LeaveController {
   @Roles('admin')
   @ApiOperation({ summary: 'Configure monthly leave credits (Admin only)' })
   @ApiResponse({ status: 201, description: 'Leave credit configuration created successfully' })
-  async configureLeaveCreditConfig(@Body() configData: any) {
-    return this.leaveService.configureLeaveCreditConfig(configData);
+  async configureLeaveCreditConfig(
+    @Body() configData: any,
+    @TenantId() tenantId: string
+  ) {
+    return this.leaveService.configureLeaveCreditConfig(configData, tenantId);
   }
 
   @Get('credit-config')
   @Roles('admin', 'hr', 'employee')
   @ApiOperation({ summary: 'Get leave credit configurations' })
   @ApiResponse({ status: 200, description: 'Leave credit configurations retrieved successfully' })
-  async getLeaveCreditConfigs() {
-    return this.leaveService.getLeaveCreditConfigs();
+  async getLeaveCreditConfigs(@TenantId() tenantId: string) {
+    return this.leaveService.getLeaveCreditConfigs(tenantId);
   }
 
   @Put('credit-config/:leaveType')
@@ -161,9 +165,10 @@ export class LeaveController {
   @ApiResponse({ status: 200, description: 'Leave credit configuration updated successfully' })
   async updateLeaveCreditConfig(
     @Param('leaveType') leaveType: string,
-    @Body() updateData: any
+    @Body() updateData: any,
+    @TenantId() tenantId: string
   ) {
-    return this.leaveService.updateLeaveCreditConfig(leaveType, updateData);
+    return this.leaveService.updateLeaveCreditConfig(leaveType, updateData, tenantId);
   }
 
   // Admin: Manual credit leave

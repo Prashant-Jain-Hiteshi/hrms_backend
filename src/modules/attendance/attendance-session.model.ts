@@ -12,6 +12,7 @@ import {
 } from 'sequelize-typescript';
 import { Attendance } from './attendance.model';
 import { User } from '../users/users.model';
+import { Company } from '../companies/companies.model';
 
 @Table({ tableName: 'attendance_sessions', timestamps: true })
 export class AttendanceSession extends Model {
@@ -31,6 +32,15 @@ export class AttendanceSession extends Model {
   @Index
   @Column(DataType.UUID)
   declare userId: string;
+
+  // Tenant relationship
+  @AllowNull(false)
+  @ForeignKey(() => Company)
+  @Column({ type: DataType.UUID })
+  declare tenantId: string;
+
+  @BelongsTo(() => Company)
+  declare company?: Company;
 
   // For convenience/querying
   @AllowNull(false)

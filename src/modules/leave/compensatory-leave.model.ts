@@ -1,5 +1,6 @@
-import { Table, Column, Model, DataType, ForeignKey, BelongsTo, CreatedAt, UpdatedAt } from 'sequelize-typescript';
+import { Table, Column, Model, DataType, ForeignKey, BelongsTo, CreatedAt, UpdatedAt, AllowNull } from 'sequelize-typescript';
 import { User } from '../users/users.model';
+import { Company } from '../companies/companies.model';
 
 export enum CompensatoryLeaveStatus {
   ACTIVE = 'active',
@@ -19,6 +20,7 @@ export interface CompensatoryLeaveCreationAttributes {
   status?: CompensatoryLeaveStatus;
   assignedBy: string;
   notes?: string | null;
+  tenantId: string;
 }
 
 @Table({
@@ -38,28 +40,28 @@ export class CompensatoryLeave extends Model<CompensatoryLeave, CompensatoryLeav
     type: DataType.UUID,
     allowNull: false,
   })
-  userId: string;
+  declare userId: string;
 
   @BelongsTo(() => User)
-  user: User;
+  declare user: User;
 
   @Column({
     type: DataType.STRING,
     allowNull: false,
   })
-  employeeId: string;
+  declare employeeId: string;
 
   @Column({
     type: DataType.STRING,
     allowNull: false,
   })
-  employeeName: string;
+  declare employeeName: string;
 
   @Column({
     type: DataType.STRING,
     allowNull: true,
   })
-  department: string;
+  declare department: string;
 
   @Column({
     type: DataType.DECIMAL(4, 2),
@@ -69,48 +71,57 @@ export class CompensatoryLeave extends Model<CompensatoryLeave, CompensatoryLeav
       max: 10,
     },
   })
-  credits: number;
+  declare credits: number;
 
   @Column({
     type: DataType.TEXT,
     allowNull: false,
   })
-  reason: string;
+  declare reason: string;
 
   @Column({
     type: DataType.DATEONLY,
     allowNull: false,
   })
-  assignedDate: string;
+  declare assignedDate: string;
 
   @Column({
     type: DataType.DATEONLY,
     allowNull: false,
   })
-  expiryDate: string;
+  declare expiryDate: string;
 
   @Column({
     type: DataType.ENUM(...Object.values(CompensatoryLeaveStatus)),
     allowNull: false,
     defaultValue: CompensatoryLeaveStatus.ACTIVE,
   })
-  status: CompensatoryLeaveStatus;
+  declare status: CompensatoryLeaveStatus;
 
   @ForeignKey(() => User)
   @Column({
     type: DataType.UUID,
     allowNull: false,
   })
-  assignedBy: string;
+  declare assignedBy: string;
 
   @BelongsTo(() => User, 'assignedBy')
-  assignedByUser: User;
+  declare assignedByUser: User;
 
   @Column({
     type: DataType.TEXT,
     allowNull: true,
   })
-  notes: string | null;
+  declare notes: string | null;
+
+  // Tenant relationship
+  @AllowNull(false)
+  @ForeignKey(() => Company)
+  @Column({ type: DataType.UUID })
+  declare tenantId: string;
+
+  @BelongsTo(() => Company)
+  declare company?: Company;
 
   @CreatedAt
   declare createdAt: Date;

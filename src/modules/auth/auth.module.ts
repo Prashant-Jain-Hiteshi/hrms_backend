@@ -9,13 +9,14 @@ import { LocalStrategy } from './strategies/local.strategy';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { SequelizeModule } from '@nestjs/sequelize';
 import { Employee } from '../employees/employees.model';
+import { Company } from '../companies/companies.model';
 
 @Module({
   imports: [
     UsersModule,
     PassportModule,
     ConfigModule,
-    SequelizeModule.forFeature([Employee]),
+    SequelizeModule.forFeature([Employee, Company]),
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({

@@ -16,6 +16,7 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@ne
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { TenantId } from '../../common/decorators/tenant.decorator';
 import { Role } from '../../common/enums/role.enum';
 import { CompensatoryLeaveService } from './compensatory-leave.service';
 import {
@@ -44,8 +45,12 @@ export class CompensatoryLeaveController {
   })
   @ApiResponse({ status: HttpStatus.FORBIDDEN, description: 'Access denied' })
   @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid input data' })
-  async create(@Body() createDto: CreateCompensatoryLeaveDto, @Request() req: any) {
-    return this.compensatoryLeaveService.create(createDto, req.user.id);
+  async create(
+    @Body() createDto: CreateCompensatoryLeaveDto, 
+    @Request() req: any,
+    @TenantId() tenantId: string
+  ) {
+    return this.compensatoryLeaveService.create(createDto, req.user.id, tenantId);
   }
 
   @Get()
@@ -62,8 +67,8 @@ export class CompensatoryLeaveController {
   @ApiQuery({ name: 'department', required: false, description: 'Filter by department' })
   @ApiQuery({ name: 'startDate', required: false, description: 'Start date (YYYY-MM-DD)' })
   @ApiQuery({ name: 'endDate', required: false, description: 'End date (YYYY-MM-DD)' })
-  async findAll(@Query() query: CompensatoryLeaveQueryDto) {
-    return this.compensatoryLeaveService.findAll(query);
+  async findAll(@Query() query: CompensatoryLeaveQueryDto, @TenantId() tenantId: string) {
+    return this.compensatoryLeaveService.findAll(query, tenantId);
   }
 
   @Get('summary')
@@ -74,8 +79,8 @@ export class CompensatoryLeaveController {
     description: 'Compensatory leave summary',
     type: CompensatoryCreditsSummaryDto,
   })
-  async getSummary() {
-    return this.compensatoryLeaveService.getSummary();
+  async getSummary(@TenantId() tenantId: string) {
+    return this.compensatoryLeaveService.getSummary(tenantId);
   }
 
   @Get('my-credits')
@@ -85,8 +90,12 @@ export class CompensatoryLeaveController {
     description: 'User compensatory leave records',
     type: [CompensatoryLeaveResponseDto],
   })
-  async getMyCredits(@Request() req: any, @Query('status') status?: CompensatoryLeaveStatus) {
-    return this.compensatoryLeaveService.findByUserId(req.user.id, status);
+  async getMyCredits(
+    @Request() req: any, 
+    @TenantId() tenantId: string,
+    @Query('status') status?: CompensatoryLeaveStatus
+  ) {
+    return this.compensatoryLeaveService.findByUserId(req.user.id, status, tenantId);
   }
 
   @Get('my-credits/total')
@@ -96,8 +105,8 @@ export class CompensatoryLeaveController {
     description: 'Total active credits',
     schema: { type: 'object', properties: { totalCredits: { type: 'number' } } },
   })
-  async getMyTotalCredits(@Request() req: any) {
-    const totalCredits = await this.compensatoryLeaveService.getActiveCreditsForUser(req.user.id);
+  async getMyTotalCredits(@Request() req: any, @TenantId() tenantId: string) {
+    const totalCredits = await this.compensatoryLeaveService.getActiveCreditsForUser(req.user.id, tenantId);
     return { totalCredits };
   }
 
@@ -112,8 +121,8 @@ export class CompensatoryLeaveController {
       example: { '2025-08': 2, '2025-09': 1 },
     },
   })
-  async getMyCreditsByMonth(@Request() req: any) {
-    return this.compensatoryLeaveService.getActiveCreditsForUserByMonth(req.user.id);
+  async getMyCreditsByMonth(@Request() req: any, @TenantId() tenantId: string) {
+    return this.compensatoryLeaveService.getActiveCreditsForUserByMonth(req.user.id, tenantId);
   }
 
   @Get(':id')
@@ -124,8 +133,12 @@ export class CompensatoryLeaveController {
     type: CompensatoryLeaveResponseDto,
   })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Record not found' })
-  async findOne(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
-    const record = await this.compensatoryLeaveService.findOne(id);
+  async findOne(
+    @Param('id', ParseIntPipe) id: number, 
+    @Request() req: any,
+    @TenantId() tenantId: string
+  ) {
+    const record = await this.compensatoryLeaveService.findOne(id, tenantId);
     
     // Allow HR/Admin to view any record, employees can only view their own
     const userRole = req.user.role?.toLowerCase();

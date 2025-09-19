@@ -9,6 +9,8 @@ import { EmployeesModule } from './modules/employees/employees.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
 import { LeaveModule } from './modules/leave/leave.module';
 import { PayrollModule } from './modules/payroll/payroll.module';
+import { CompaniesModule } from './modules/companies/companies.module';
+import { SuperAdminModule } from './modules/super-admin/super-admin.module';
 
 @Module({
   imports: [
@@ -19,12 +21,19 @@ import { PayrollModule } from './modules/payroll/payroll.module';
     SequelizeModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
-        const logging =
-          config.get('DB_LOGGING') === 'true' ? console.log : false;
+        const logging = true; // Force enable logging to see table operations
         const ssl = config.get('DB_SSL') === 'true';
         const dialectOptions = ssl
           ? { ssl: { require: true, rejectUnauthorized: false } }
           : {};
+
+        const dbSync = config.get('DB_SYNC', 'false') === 'true';
+        console.log('🔧 Database Configuration:');
+        console.log('  - DB_SYNC:', config.get('DB_SYNC', 'false'), '→', dbSync);
+        console.log('  - Host:', config.get('DB_HOST', 'localhost'));
+        console.log('  - Database:', config.get('DB_NAME', 'hrm_db'));
+        console.log('  - AutoLoadModels: true');
+        console.log('  - Synchronize:', dbSync);
 
         return {
           dialect: 'postgres',
@@ -34,7 +43,7 @@ import { PayrollModule } from './modules/payroll/payroll.module';
           username: config.get('DB_USER', 'postgres'),
           password: config.get('DB_PASS', 'postgres'),
           autoLoadModels: true,
-          synchronize: config.get('DB_SYNC', 'false') === 'true',
+          synchronize: dbSync,
           logging,
           dialectOptions,
         } as any;
@@ -46,6 +55,8 @@ import { PayrollModule } from './modules/payroll/payroll.module';
     AttendanceModule,
     LeaveModule,
     PayrollModule,
+    CompaniesModule,
+    SuperAdminModule,
   ],
   controllers: [AppController],
   providers: [AppService],

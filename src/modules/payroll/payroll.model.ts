@@ -5,8 +5,10 @@ import {
   DataType,
   ForeignKey,
   BelongsTo,
+  AllowNull,
 } from 'sequelize-typescript';
 import { Employee } from '../employees/employees.model';
+import { Company } from '../companies/companies.model';
 
 export enum PayrollStatus {
   PENDING = 'PENDING',
@@ -30,6 +32,15 @@ export class Payroll extends Model {
 
   @BelongsTo(() => Employee)
   employee: Employee;
+
+  // Tenant relationship
+  @AllowNull(false)
+  @ForeignKey(() => Company)
+  @Column({ type: DataType.UUID })
+  declare tenantId: string;
+
+  @BelongsTo(() => Company)
+  declare company?: Company;
 
   @Column(DataType.DATEONLY)
   payPeriodStart: Date;

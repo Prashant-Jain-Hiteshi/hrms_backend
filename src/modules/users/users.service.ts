@@ -34,6 +34,7 @@ export class UsersService {
         lastName: dto.lastName,
         role: dto.role,
         avatarUrl: dto.avatarUrl,
+        tenantId: dto.tenantId, // Include tenant ID
       } as any);
       return user; // passwordHash is hidden by model toJSON
     } catch (e) {

@@ -9,6 +9,8 @@ type JwtPayload = {
   email: string;
   role: Role | 'admin' | 'hr' | 'employee' | 'finance';
   employeeId?: string;
+  tenantId?: string;
+  companyCode?: string;
 };
 
 @Injectable()
@@ -22,12 +24,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   validate(payload: JwtPayload) {
-    // payload: { sub, email, role, employeeId? }
+    // payload: { sub, email, role, employeeId?, tenantId?, companyCode? }
     return {
       id: payload.sub,
       email: payload.email,
       role: payload.role,
       employeeId: payload.employeeId,
+      tenantId: payload.tenantId,
+      companyCode: payload.companyCode,
     };
   }
 }

@@ -12,6 +12,7 @@ import {
 } from 'sequelize-typescript';
 import { User } from '../users/users.model';
 import { Employee } from '../employees/employees.model';
+import { Company } from '../companies/companies.model';
 
 export type AttendanceStatus = 'present' | 'absent' | 'late' | 'half_day';
 
@@ -33,6 +34,15 @@ export class Attendance extends Model {
   @Index
   @Column(DataType.UUID)
   declare employeeId?: string | null;
+
+  // Tenant relationship
+  @AllowNull(false)
+  @ForeignKey(() => Company)
+  @Column({ type: DataType.UUID })
+  declare tenantId: string;
+
+  @BelongsTo(() => Company)
+  declare company?: Company;
 
   @AllowNull(false)
   @Index

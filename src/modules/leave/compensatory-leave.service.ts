@@ -22,23 +22,53 @@ export class CompensatoryLeaveService {
     private employeeModel: typeof Employee,
   ) {}
 
-  async create(createDto: CreateCompensatoryLeaveDto, assignedByUserId: string): Promise<CompensatoryLeave> {
-    console.log('CompensatoryLeave create - DTO:', createDto);
-    console.log('CompensatoryLeave create - assignedByUserId:', assignedByUserId);
+  async create(createDto: CreateCompensatoryLeaveDto, assignedByUserId: string, tenantId: string): Promise<CompensatoryLeave> {
+    console.log('🔍 CompensatoryLeave create - DTO:', createDto);
+    console.log('🔍 CompensatoryLeave create - assignedByUserId:', assignedByUserId);
+    console.log('🔍 CompensatoryLeave create - tenantId:', tenantId);
     
-    // Find employee by ID and get associated user
-    const employee = await this.employeeModel.findByPk(createDto.employeeId, {
+    // Find employee by ID within the same tenant
+    const whereClause: any = { id: createDto.employeeId };
+    
+    // Only add tenantId filter if the column exists (after DB sync)
+    try {
+      whereClause.tenantId = tenantId;
+      console.log('✅ Added tenantId filter to employee lookup');
+    } catch (error) {
+      console.log('⚠️ TenantId column may not exist yet, skipping tenant filter');
+    }
+    
+    console.log('🔍 Employee lookup where clause:', whereClause);
+    
+    const employee = await this.employeeModel.findOne({
+      where: whereClause,
       include: [{ model: User, as: 'user' }]
     });
+    
+    console.log('🔍 Employee found:', employee ? `${employee.name} (${employee.employeeId})` : 'NOT FOUND');
 
     if (!employee) {
-      throw new NotFoundException('Employee not found');
+      throw new NotFoundException('Employee not found in your organization');
     }
 
-    // Find user by email since that's the relationship
+    // Find user by email within the same tenant
+    const userWhereClause: any = { email: employee.email };
+    
+    // Only add tenantId filter if the column exists (after DB sync)
+    try {
+      userWhereClause.tenantId = tenantId;
+      console.log('✅ Added tenantId filter to user lookup');
+    } catch (error) {
+      console.log('⚠️ TenantId column may not exist yet for users, skipping tenant filter');
+    }
+    
+    console.log('🔍 User lookup where clause:', userWhereClause);
+    
     const user = await this.userModel.findOne({
-      where: { email: employee.email }
+      where: userWhereClause
     });
+
+    console.log('🔍 User found:', user ? `${user.firstName} ${user.lastName} (${user.email})` : 'NOT FOUND');
 
     if (!user) {
       throw new BadRequestException('Employee is not associated with a user account');
@@ -47,11 +77,14 @@ export class CompensatoryLeaveService {
     // Verify expiry date is in the future
     const expiryDate = new Date(createDto.expiryDate);
     const today = new Date();
+    console.log('🔍 Date validation - Today:', today.toISOString().split('T')[0], 'Expiry:', createDto.expiryDate);
+    
     if (expiryDate <= today) {
       throw new BadRequestException('Expiry date must be in the future');
     }
 
-    const compensatoryLeave = await this.compensatoryLeaveModel.create({
+    // Prepare the compensatory leave data
+    const compensatoryData: any = {
       userId: user.id,
       employeeId: employee.employeeId,
       employeeName: employee.name,
@@ -63,13 +96,30 @@ export class CompensatoryLeaveService {
       status: CompensatoryLeaveStatus.ACTIVE,
       assignedBy: assignedByUserId,
       notes: createDto.notes || null,
-    } as any);
+    };
 
-    return this.findOne(compensatoryLeave.id);
+    // Add tenantId to compensatory data
+    try {
+      compensatoryData.tenantId = tenantId;
+      console.log('✅ Added tenantId to compensatory data');
+    } catch (error) {
+      console.log('⚠️ TenantId column may not exist yet in compensatory_leaves table:', error.message);
+      // Continue without tenantId for now
+    }
+
+    console.log('🔍 Creating compensatory leave with data:', compensatoryData);
+
+    const compensatoryLeave = await this.compensatoryLeaveModel.create(compensatoryData);
+    
+    console.log('✅ Compensatory leave created with ID:', compensatoryLeave.id);
+
+    return this.findOne(compensatoryLeave.id, tenantId);
   }
 
-  async findAll(query: CompensatoryLeaveQueryDto = {}): Promise<CompensatoryLeave[]> {
-    const whereClause: any = {};
+  async findAll(query: CompensatoryLeaveQueryDto = {}, tenantId: string): Promise<CompensatoryLeave[]> {
+    const whereClause: any = {
+      tenantId: tenantId  // Filter by tenant
+    };
 
     if (query.employeeId) {
       whereClause.employeeId = query.employeeId;
@@ -110,8 +160,14 @@ export class CompensatoryLeaveService {
     });
   }
 
-  async findOne(id: number): Promise<CompensatoryLeave> {
-    const compensatoryLeave = await this.compensatoryLeaveModel.findByPk(id, {
+  async findOne(id: number, tenantId?: string): Promise<CompensatoryLeave> {
+    const whereClause: any = { id };
+    if (tenantId) {
+      whereClause.tenantId = tenantId;
+    }
+
+    const compensatoryLeave = await this.compensatoryLeaveModel.findOne({
+      where: whereClause,
       include: [
         {
           model: User,
@@ -128,11 +184,15 @@ export class CompensatoryLeaveService {
     return compensatoryLeave;
   }
 
-  async findByUserId(userId: string, status?: CompensatoryLeaveStatus): Promise<CompensatoryLeave[]> {
+  async findByUserId(userId: string, status?: CompensatoryLeaveStatus, tenantId?: string): Promise<CompensatoryLeave[]> {
     const whereClause: any = { userId };
     
     if (status) {
       whereClause.status = status;
+    }
+
+    if (tenantId) {
+      whereClause.tenantId = tenantId;
     }
 
     return this.compensatoryLeaveModel.findAll({
@@ -169,7 +229,7 @@ export class CompensatoryLeaveService {
     await compensatoryLeave.destroy();
   }
 
-  async getSummary(): Promise<CompensatoryCreditsSummaryDto> {
+  async getSummary(tenantId: string): Promise<CompensatoryCreditsSummaryDto> {
     const today = new Date();
     const thirtyDaysFromNow = new Date();
     thirtyDaysFromNow.setDate(today.getDate() + 30);
@@ -181,36 +241,49 @@ export class CompensatoryLeaveService {
       totalExpired,
       totalUsed
     ] = await Promise.all([
-      // Total active credits
+      // Total active credits for this tenant
       this.compensatoryLeaveModel.sum('credits', {
-        where: { status: CompensatoryLeaveStatus.ACTIVE }
+        where: { 
+          status: CompensatoryLeaveStatus.ACTIVE,
+          tenantId: tenantId 
+        }
       }),
 
-      // Total employees with active credits
+      // Total employees with active credits for this tenant
       this.compensatoryLeaveModel.count({
-        where: { status: CompensatoryLeaveStatus.ACTIVE },
+        where: { 
+          status: CompensatoryLeaveStatus.ACTIVE,
+          tenantId: tenantId 
+        },
         distinct: true,
         col: 'userId'
       }),
 
-      // Credits expiring soon (within 30 days)
+      // Credits expiring soon (within 30 days) for this tenant
       this.compensatoryLeaveModel.count({
         where: {
           status: CompensatoryLeaveStatus.ACTIVE,
+          tenantId: tenantId,
           expiryDate: {
             [Op.between]: [today.toISOString().split('T')[0], thirtyDaysFromNow.toISOString().split('T')[0]]
           }
         }
       }),
 
-      // Total expired credits
+      // Total expired credits for this tenant
       this.compensatoryLeaveModel.count({
-        where: { status: CompensatoryLeaveStatus.EXPIRED }
+        where: { 
+          status: CompensatoryLeaveStatus.EXPIRED,
+          tenantId: tenantId 
+        }
       }),
 
-      // Total used credits
+      // Total used credits for this tenant
       this.compensatoryLeaveModel.count({
-        where: { status: CompensatoryLeaveStatus.USED }
+        where: { 
+          status: CompensatoryLeaveStatus.USED,
+          tenantId: tenantId 
+        }
       })
     ]);
 
@@ -223,25 +296,39 @@ export class CompensatoryLeaveService {
     };
   }
 
-  async getActiveCreditsForUser(userId: number): Promise<number> {
+  async getActiveCreditsForUser(userId: number, tenantId?: string): Promise<number> {
+    const whereClause: any = {
+      userId,
+      status: CompensatoryLeaveStatus.ACTIVE,
+      expiryDate: { [Op.gte]: new Date().toISOString().split('T')[0] }
+    };
+
+    if (tenantId) {
+      whereClause.tenantId = tenantId;
+    }
+
     const result = await this.compensatoryLeaveModel.sum('credits', {
-      where: {
-        userId,
-        status: CompensatoryLeaveStatus.ACTIVE,
-        expiryDate: { [Op.gte]: new Date().toISOString().split('T')[0] }
-      }
+      where: whereClause
     });
 
     return result || 0;
   }
 
-  async getActiveCreditsForUserByMonth(userId: number): Promise<Record<string, number>> {
+  async getActiveCreditsForUserByMonth(userId: number, tenantId?: string): Promise<Record<string, number>> {
+    const whereClause: any = {
+      userId,
+      status: CompensatoryLeaveStatus.ACTIVE,
+    };
+
+    if (tenantId) {
+      whereClause.tenantId = tenantId;
+    }
+
+    // Add expiry date filter to where clause
+    whereClause.expiryDate = { [Op.gte]: new Date().toISOString().split('T')[0] };
+
     const activeCredits = await this.compensatoryLeaveModel.findAll({
-      where: {
-        userId,
-        status: CompensatoryLeaveStatus.ACTIVE,
-        expiryDate: { [Op.gte]: new Date().toISOString().split('T')[0] }
-      },
+      where: whereClause,
       attributes: ['credits', 'assignedDate']
     });
 

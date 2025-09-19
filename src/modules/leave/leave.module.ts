@@ -21,6 +21,7 @@ import { CompensatoryLeave } from './compensatory-leave.model';
 import { CompensatoryLeaveController } from './compensatory-leave.controller';
 import { CompensatoryLeaveService } from './compensatory-leave.service';
 import { User } from '../users/users.model';
+import { Company } from '../companies/companies.model';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { User } from '../users/users.model';
       WeekendSetting,
       CompensatoryLeave,
       User,
+      Company,
     ]),
   ],
   controllers: [LeaveController, LeaveTypeController, CalendarController, CompensatoryLeaveController],

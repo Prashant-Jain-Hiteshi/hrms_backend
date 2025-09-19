@@ -9,9 +9,12 @@ import {
   Unique,
   AllowNull,
   HasOne,
+  ForeignKey,
+  BelongsTo,
 } from 'sequelize-typescript';
 import { Role } from '../../common/enums/role.enum';
 import { Employee } from '../employees/employees.model';
+import { Company } from '../companies/companies.model';
 
 @Table({ tableName: 'users', timestamps: true })
 export class User extends Model {
@@ -59,6 +62,15 @@ export class User extends Model {
   @AllowNull(true)
   @Column(DataType.DATE)
   declare lastLoginAt?: Date | null;
+
+  // Tenant relationship
+  @AllowNull(true)
+  @ForeignKey(() => Company)
+  @Column({ type: DataType.UUID })
+  declare tenantId?: string;
+
+  @BelongsTo(() => Company)
+  declare company?: Company;
 
   // Association with Employee
   @HasOne(() => Employee, { foreignKey: 'email', sourceKey: 'email', as: 'employee' })

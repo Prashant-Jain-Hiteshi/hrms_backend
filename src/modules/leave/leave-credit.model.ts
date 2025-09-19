@@ -1,5 +1,6 @@
-import { Table, Column, Model, DataType, PrimaryKey, AutoIncrement, CreatedAt, UpdatedAt, ForeignKey, BelongsTo } from 'sequelize-typescript';
+import { Table, Column, Model, DataType, PrimaryKey, AutoIncrement, CreatedAt, UpdatedAt, ForeignKey, BelongsTo, AllowNull } from 'sequelize-typescript';
 import { Employee } from '../employees/employees.model';
+import { Company } from '../companies/companies.model';
 
 interface LeaveCreditCreationAttributes {
   employeeId: string;
@@ -78,6 +79,7 @@ export class LeaveCredit extends Model<LeaveCredit, LeaveCreditCreationAttribute
 interface LeaveCreditConfigCreationAttributes {
   leaveType: string;
   monthlyCredit: number;
+  tenantId: string;
   maxAnnualLimit?: number;
   isActive?: boolean;
   description?: string;
@@ -96,9 +98,17 @@ export class LeaveCreditConfig extends Model<LeaveCreditConfig, LeaveCreditConfi
   @Column({
     type: DataType.ENUM('annual', 'sick', 'personal', 'maternity', 'paternity', 'casual'),
     allowNull: false,
-    unique: true,
   })
   leaveType: string;
+
+  // Tenant relationship
+  @AllowNull(false)
+  @ForeignKey(() => Company)
+  @Column({ type: DataType.UUID })
+  declare tenantId: string;
+
+  @BelongsTo(() => Company)
+  declare company?: Company;
 
   @Column({
     type: DataType.DECIMAL(5, 2),

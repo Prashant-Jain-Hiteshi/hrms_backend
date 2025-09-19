@@ -1,7 +1,9 @@
-import { Table, Column, Model, DataType, PrimaryKey, AutoIncrement, CreatedAt, UpdatedAt } from 'sequelize-typescript';
+import { Table, Column, Model, DataType, PrimaryKey, AutoIncrement, CreatedAt, UpdatedAt, ForeignKey, BelongsTo, AllowNull } from 'sequelize-typescript';
+import { Company } from '../companies/companies.model';
 
 interface WeekendSettingCreationAttributes {
   weekends: number[]; // 0..6
+  tenantId: string;
 }
 
 @Table({
@@ -13,6 +15,15 @@ export class WeekendSetting extends Model<WeekendSetting, WeekendSettingCreation
   @AutoIncrement
   @Column(DataType.INTEGER)
   declare id: number;
+
+  // Tenant relationship
+  @AllowNull(false)
+  @ForeignKey(() => Company)
+  @Column({ type: DataType.UUID })
+  declare tenantId: string;
+
+  @BelongsTo(() => Company)
+  declare company?: Company;
 
   @Column({
     type: DataType.JSON,

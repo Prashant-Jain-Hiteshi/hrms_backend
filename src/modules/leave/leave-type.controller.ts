@@ -12,6 +12,7 @@ import {
   HttpStatus,
   HttpCode,
   ParseIntPipe,
+  Logger,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -25,12 +26,15 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { LeaveTypeService } from './leave-type.service';
 import { CreateLeaveTypeDto, UpdateLeaveTypeDto } from './dto/leave-type.dto';
+import { TenantId, CompanyCode } from '../../common/decorators/tenant.decorator';
 
 @ApiTags('Leave Types Management')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('leave-types')
 export class LeaveTypeController {
+  private readonly logger = new Logger(LeaveTypeController.name);
+
   constructor(private readonly leaveTypeService: LeaveTypeService) {}
 
   @Post()
@@ -46,8 +50,13 @@ export class LeaveTypeController {
     status: 403,
     description: 'Forbidden - Admin access required',
   })
-  async createLeaveType(@Body() createLeaveTypeDto: CreateLeaveTypeDto) {
-    return this.leaveTypeService.createLeaveType(createLeaveTypeDto);
+  async createLeaveType(
+    @Body() createLeaveTypeDto: CreateLeaveTypeDto,
+    @TenantId() tenantId: string,
+    @CompanyCode() companyCode: string
+  ) {
+    this.logger.log(`Creating leave type for tenant: ${tenantId} (${companyCode})`);
+    return this.leaveTypeService.createLeaveType(createLeaveTypeDto, tenantId);
   }
 
   @Get()
@@ -67,18 +76,22 @@ export class LeaveTypeController {
     description: 'Filter by eligibility type',
   })
   async getAllLeaveTypes(
+    @TenantId() tenantId: string,
+    @CompanyCode() companyCode: string,
     @Query('search') search?: string,
     @Query('eligibility') eligibility?: string,
   ) {
+    this.logger.log(`Getting leave types for tenant: ${tenantId} (${companyCode})`);
+    
     if (search) {
-      return this.leaveTypeService.searchLeaveTypes(search);
+      return this.leaveTypeService.searchLeaveTypes(search, tenantId);
     }
 
     if (eligibility) {
-      return this.leaveTypeService.getLeaveTypesByEligibility(eligibility);
+      return this.leaveTypeService.getLeaveTypesByEligibility(eligibility, tenantId);
     }
 
-    return this.leaveTypeService.getAllLeaveTypes();
+    return this.leaveTypeService.getAllLeaveTypes(tenantId);
   }
 
   @Get(':id')
@@ -88,8 +101,11 @@ export class LeaveTypeController {
     description: 'Leave type retrieved successfully',
   })
   @ApiResponse({ status: 404, description: 'Leave type not found' })
-  async getLeaveTypeById(@Param('id', ParseIntPipe) id: number) {
-    return this.leaveTypeService.getLeaveTypeById(id);
+  async getLeaveTypeById(
+    @Param('id', ParseIntPipe) id: number,
+    @TenantId() tenantId: string
+  ) {
+    return this.leaveTypeService.getLeaveTypeById(id, tenantId);
   }
 
   @Put(':id')
@@ -109,8 +125,9 @@ export class LeaveTypeController {
   async updateLeaveType(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateLeaveTypeDto: UpdateLeaveTypeDto,
+    @TenantId() tenantId: string,
   ) {
-    return this.leaveTypeService.updateLeaveType(id, updateLeaveTypeDto);
+    return this.leaveTypeService.updateLeaveType(id, updateLeaveTypeDto, tenantId);
   }
 
   @Delete(':id')
@@ -123,8 +140,11 @@ export class LeaveTypeController {
     description: 'Forbidden - Admin access required',
   })
   @HttpCode(HttpStatus.OK)
-  async deleteLeaveType(@Param('id', ParseIntPipe) id: number) {
-    return this.leaveTypeService.deleteLeaveType(id);
+  async deleteLeaveType(
+    @Param('id', ParseIntPipe) id: number,
+    @TenantId() tenantId: string
+  ) {
+    return this.leaveTypeService.deleteLeaveType(id, tenantId);
   }
 
   @Put(':id/toggle-status')
@@ -139,7 +159,10 @@ export class LeaveTypeController {
     status: 403,
     description: 'Forbidden - Admin access required',
   })
-  async toggleLeaveTypeStatus(@Param('id', ParseIntPipe) id: number) {
-    return this.leaveTypeService.toggleLeaveTypeStatus(id);
+  async toggleLeaveTypeStatus(
+    @Param('id', ParseIntPipe) id: number,
+    @TenantId() tenantId: string
+  ) {
+    return this.leaveTypeService.toggleLeaveTypeStatus(id, tenantId);
   }
 }

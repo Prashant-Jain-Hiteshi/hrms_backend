@@ -675,14 +675,14 @@ export class LeaveService {
     // Get employee details first - handle both string employeeId and UUID lookups
     let employee = await this.employeeModel.findOne({
       where: { employeeId },
-      attributes: ['id', 'employeeId', 'name', 'joiningDate'],
+      attributes: ['id', 'employeeId', 'name', 'joiningDate', 'tenantId'],
     });
 
     // If not found by employeeId string, try by UUID (fallback)
     if (!employee && employeeId) {
       employee = await this.employeeModel.findOne({
         where: { id: employeeId },
-        attributes: ['id', 'employeeId', 'name', 'joiningDate'],
+        attributes: ['id', 'employeeId', 'name', 'joiningDate', 'tenantId'],
       });
     }
 
@@ -690,9 +690,12 @@ export class LeaveService {
       throw new NotFoundException(`Employee not found with ID: ${employeeId}`);
     }
 
-    // Get active credit configs (dynamic leave types configured by admin)
+    // Get active credit configs for this employee's tenant (dynamic leave types configured by admin)
     const configs = await this.leaveCreditConfigModel.findAll({
-      where: { isActive: true },
+      where: { 
+        isActive: true,
+        tenantId: employee.tenantId 
+      },
       attributes: ['leaveType', 'monthlyCredit', 'maxAnnualLimit'],
       raw: true,
       order: [['leaveType', 'ASC']],
@@ -859,8 +862,8 @@ export class LeaveService {
     return balance;
   }
 
-  // Leave Credit Configuration Methods
-  async configureLeaveCreditConfig(configData: any) {
+  // Leave Credit Configuration Methods - Tenant-aware
+  async configureLeaveCreditConfig(configData: any, tenantId: string) {
     const leaveType = String(configData.leaveType).toLowerCase();
     const monthlyCredit = Number(configData.monthlyCredit);
     const isActive = configData.isActive !== false;
@@ -869,10 +872,10 @@ export class LeaveService {
       throw new BadRequestException('leaveType and monthlyCredit are required');
     }
 
-    // Upsert by unique leaveType
+    // Upsert by unique leaveType within tenant
     const [record, created] = await this.leaveCreditConfigModel.findOrCreate({
-      where: { leaveType },
-      defaults: { leaveType, monthlyCredit, isActive },
+      where: { leaveType, tenantId },
+      defaults: { leaveType, monthlyCredit, isActive, tenantId },
     });
 
     if (!created) {
@@ -881,7 +884,7 @@ export class LeaveService {
 
     // Refetch to ensure all fields are populated from DB
     const saved = await this.leaveCreditConfigModel.findOne({
-      where: { leaveType },
+      where: { leaveType, tenantId },
       attributes: ['leaveType', 'monthlyCredit', 'isActive', 'updatedAt', 'createdAt'],
       raw: true,
     });
@@ -897,9 +900,11 @@ export class LeaveService {
     };
   }
 
-  async getLeaveCreditConfigs() {
+  // Tenant-aware leave credit configurations
+  async getLeaveCreditConfigs(tenantId: string) {
     const rows = await this.leaveCreditConfigModel.findAll({
-      attributes: ['leaveType', 'monthlyCredit', 'isActive'],
+      where: { tenantId },
+      attributes: ['leaveType', 'monthlyCredit', 'isActive', 'tenantId'],
       order: [['leaveType', 'ASC']],
       raw: true,
     });
@@ -907,14 +912,21 @@ export class LeaveService {
       leaveType: r.leaveType,
       monthlyCredit: r.monthlyCredit != null ? Number(r.monthlyCredit) : 0,
       isActive: !!r.isActive,
+      tenantId: r.tenantId,
     }));
   }
 
-  async updateLeaveCreditConfig(leaveType: string, updateData: any) {
+  // Tenant-aware update leave credit config
+  async updateLeaveCreditConfig(leaveType: string, updateData: any, tenantId: string) {
     const key = String(leaveType).toLowerCase();
-    const record = await this.leaveCreditConfigModel.findOne({ where: { leaveType: key } });
+    const record = await this.leaveCreditConfigModel.findOne({ 
+      where: { 
+        leaveType: key,
+        tenantId: tenantId 
+      } 
+    });
     if (!record) {
-      throw new NotFoundException('Configuration not found');
+      throw new NotFoundException('Configuration not found for this company');
     }
 
     const update: Partial<LeaveCreditConfig> = {} as any;
