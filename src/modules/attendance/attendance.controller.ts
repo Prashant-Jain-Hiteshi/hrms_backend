@@ -24,6 +24,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { Role } from '../../common/enums/role.enum';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { AddEmployeeAttendanceDto } from './dto/add-employee-attendance.dto';
+import { TenantId } from '../../common/decorators/tenant.decorator';
 
 @ApiTags('Attendance')
 @ApiBearerAuth()
@@ -34,16 +35,16 @@ export class AttendanceController {
 
   @Post('check-in')
   @ApiOperation({ summary: 'Check-in for the current user' })
-  async checkIn(@Req() req: any, @Body() dto: CheckInDto) {
+  async checkIn(@Req() req: any, @Body() dto: CheckInDto, @TenantId() tenantId: string) {
     const user = req.user as { id: string; email: string; role: string };
-    return this.attendanceService.checkIn(user, dto);
+    return this.attendanceService.checkIn(user, dto, tenantId);
   }
 
   @Post('check-out')
   @ApiOperation({ summary: 'Check-out for the current user' })
-  async checkOut(@Req() req: any, @Body() dto: CheckOutDto) {
+  async checkOut(@Req() req: any, @Body() dto: CheckOutDto, @TenantId() tenantId: string) {
     const user = req.user as { id: string; email: string; role: string };
-    return this.attendanceService.checkOut(user, dto);
+    return this.attendanceService.checkOut(user, dto, tenantId);
   }
 
   @Get('me')
@@ -62,11 +63,12 @@ export class AttendanceController {
   })
   async myAttendance(
     @Req() req: any,
+    @TenantId() tenantId: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {
     const user = req.user as { id: string; email: string };
-    return this.attendanceService.myAttendance(user, from, to);
+    return this.attendanceService.myAttendance(user, from, to, tenantId);
   }
 
   @Get('summary')
@@ -109,10 +111,11 @@ export class AttendanceController {
   @UseGuards(RolesGuard)
   @Roles(Role.ADMIN, Role.HR)
   async adminStatus(
+    @TenantId() tenantId: string,
     @Query('userId') userId: string,
     @Query('date') date?: string,
   ) {
-    return this.attendanceService.adminStatus(userId, date);
+    return this.attendanceService.adminStatus(userId, date, tenantId);
   }
 
   @Put('admin-session')
@@ -157,6 +160,7 @@ export class AttendanceController {
   @UseGuards(RolesGuard)
   @Roles(Role.ADMIN, Role.HR)
   async listAll(
+    @TenantId() tenantId: string,
     @Query('type') type?: 'monthly' | 'daily',
     @Query('date') date?: string,
     @Query('from') from?: string,
@@ -191,9 +195,9 @@ export class AttendanceController {
           'status=absent requires type=daily&date or from=to',
         );
       }
-      return this.attendanceService.listAllByStatus(day, 'absent');
+      return this.attendanceService.listAllByStatus(day, 'absent', tenantId);
     }
-    return this.attendanceService.listAll(from, to, status);
+    return this.attendanceService.listAll(from, to, status, tenantId);
   }
 
   @Get('report')
@@ -265,8 +269,8 @@ export class AttendanceController {
   })
   @UseGuards(RolesGuard)
   @Roles(Role.ADMIN, Role.HR)
-  async weekly() {
-    return this.attendanceService.weeklyOverview();
+  async weekly(@TenantId() tenantId: string) {
+    return this.attendanceService.weeklyOverview(tenantId);
   }
 
   @Get('employee-summary')
@@ -293,6 +297,7 @@ export class AttendanceController {
   })
   async getEmployeeAttendanceSummary(
     @Req() req: any,
+    @TenantId() tenantId: string,
     @Query('employeeId') employeeId?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
@@ -313,6 +318,7 @@ export class AttendanceController {
       targetEmployeeId,
       from,
       to,
+      tenantId,
     );
   }
 
@@ -320,41 +326,45 @@ export class AttendanceController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.HR)
   async getOverallAttendanceStats(
+    @TenantId() tenantId: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {
-    return this.attendanceService.getOverallAttendanceStats(from, to);
+    return this.attendanceService.getOverallAttendanceStats(from, to, tenantId);
   }
 
   @Get('stats-by-range')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.HR)
   async getAttendanceStatsByRange(
+    @TenantId() tenantId: string,
     @Query('from') from: string,
     @Query('to') to: string,
   ) {
-    return this.attendanceService.getAttendanceStatsByDateRange(from, to);
+    return this.attendanceService.getAttendanceStatsByDateRange(from, to, tenantId);
   }
 
   @Post('add-employee-attendance')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.HR)
   async addEmployeeAttendance(
+    @TenantId() tenantId: string,
     @Body() attendanceData: AddEmployeeAttendanceDto,
     @Req() req: any,
   ) {
     const user = req.user as { id: string; role: string };
-    return this.attendanceService.addEmployeeAttendance(attendanceData, user);
+    return this.attendanceService.addEmployeeAttendance(attendanceData, user, tenantId);
   }
 
   @Get('date-details')
   @ApiOperation({ summary: 'Get attendance details for a specific date' })
   async getAttendanceForDate(
     @Req() req: any,
+    @TenantId() tenantId: string,
     @Query('date') date: string,
   ) {
     const user = req.user as { id: string; email: string; role: string };
-    return this.attendanceService.getAttendanceForDate(user, date);
+    return this.attendanceService.getAttendanceForDate(user, date, tenantId);
   }
 
 

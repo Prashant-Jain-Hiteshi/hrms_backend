@@ -10,23 +10,8 @@ import {
 
 export class CreateLeaveDto {
   @IsNotEmpty()
-  @IsEnum([
-    'sick',
-    'casual',
-    'annual',
-    'maternity',
-    'paternity',
-    'emergency',
-    'other',
-  ])
-  leaveType:
-    | 'sick'
-    | 'casual'
-    | 'annual'
-    | 'maternity'
-    | 'paternity'
-    | 'emergency'
-    | 'other';
+  @IsString()
+  leaveType: string;
 
   @IsNotEmpty()
   @IsDateString()

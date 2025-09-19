@@ -36,18 +36,25 @@ export class AttendanceService {
     @InjectModel(Employee) private readonly employeeModel: typeof Employee,
   ) {}
 
-  async checkIn(user: { id: string; email: string }, dto: CheckInDto) {
+  async checkIn(user: { id: string; email: string }, dto: CheckInDto, tenantId: string) {
     const date = dto.date || toDateOnly(new Date());
     const checkInTime = dto.checkInTime || nowTime();
 
-    // Try to link employee by email (optional)
+    // Try to link employee by email (tenant-scoped)
     const employee = await this.employeeModel.findOne({
-      where: { email: user.email },
+      where: { 
+        email: user.email,
+        tenantId: tenantId 
+      },
     });
 
-    // Upsert parent attendance record
+    // Upsert parent attendance record (tenant-scoped)
     let record = await this.attendanceModel.findOne({
-      where: { userId: user.id, date },
+      where: { 
+        userId: user.id, 
+        date,
+        tenantId: tenantId 
+      },
     });
     if (!record) {
       record = await this.attendanceModel.create({
@@ -56,6 +63,7 @@ export class AttendanceService {
         date,
         checkIn: checkInTime,
         status: this.isLate(checkInTime) ? 'late' : 'present',
+        tenantId: tenantId,
       } as any);
     } else {
       // update earliest checkIn if this is earlier
@@ -69,37 +77,52 @@ export class AttendanceService {
       }
     }
 
-    // Ensure no open session exists for today
+    // Ensure no open session exists for today (tenant-scoped)
     const open = await this.sessionModel.findOne({
-      where: { userId: user.id, date, endTime: { [Op.is]: null } },
+      where: { 
+        userId: user.id, 
+        date, 
+        endTime: { [Op.is]: null },
+        tenantId: tenantId 
+      },
     });
     if (open)
       throw new BadRequestException(
         'You already have an active session. Please check out first.',
       );
 
-    // Create a new session
+    // Create a new session (with tenantId)
     await this.sessionModel.create({
       attendanceId: record.id,
       userId: user.id,
       date,
       startTime: checkInTime,
+      tenantId: tenantId,
     } as any);
     return record;
   }
 
-  async checkOut(user: { id: string }, dto: CheckOutDto) {
+  async checkOut(user: { id: string }, dto: CheckOutDto, tenantId: string) {
     const date = dto.date || toDateOnly(new Date());
     const checkOutTime = dto.checkOutTime || nowTime();
 
     const record = await this.attendanceModel.findOne({
-      where: { userId: user.id, date },
+      where: { 
+        userId: user.id, 
+        date,
+        tenantId: tenantId 
+      },
     });
     if (!record) throw new NotFoundException('No attendance record for today');
 
-    // Find open session
+    // Find open session (tenant-scoped)
     const session = await this.sessionModel.findOne({
-      where: { userId: user.id, date, endTime: { [Op.is]: null } },
+      where: { 
+        userId: user.id, 
+        date, 
+        endTime: { [Op.is]: null },
+        tenantId: tenantId 
+      },
       order: [['createdAt', 'DESC']],
     });
     if (!session)
@@ -128,10 +151,15 @@ export class AttendanceService {
     return record;
   }
 
-  async myAttendance(user: { id: string; email?: string }, from?: string, to?: string) {
-    // First, find the employee record for this user
+  async myAttendance(user: { id: string; email?: string }, from?: string, to?: string, tenantId?: string) {
+    // First, find the employee record for this user (tenant-scoped)
+    const employeeWhere: any = { email: user.email };
+    if (tenantId) {
+      employeeWhere.tenantId = tenantId;
+    }
+    
     const employee = await this.employeeModel.findOne({
-      where: { email: user.email }
+      where: employeeWhere
     });
 
     // Build date filter
@@ -139,6 +167,11 @@ export class AttendanceService {
     if (from && to) dateFilter.date = { [Op.between]: [from, to] };
     else if (from) dateFilter.date = { [Op.gte]: from };
     else if (to) dateFilter.date = { [Op.lte]: to };
+
+    // Add tenant filter to date filter
+    if (tenantId) {
+      dateFilter.tenantId = tenantId;
+    }
 
     // Build where clause to include both self-created and HR/Admin-created records
     const where: any = {
@@ -611,24 +644,30 @@ export class AttendanceService {
   }
 
   // Admin/HR: get status and sessions for a specific user on a date
-  async adminStatus(targetUserId: string, date?: string) {
+  async adminStatus(targetUserId: string, date?: string, tenantId?: string) {
     if (!targetUserId) throw new BadRequestException('userId is required');
     const day = date || toDateOnly(new Date());
     
-    console.log(`🔍 DEBUG adminStatus: targetUserId=${targetUserId}, date=${day}`);
+    console.log(`🔍 DEBUG adminStatus: targetUserId=${targetUserId}, date=${day}, tenantId=${tenantId}`);
     
-    // First, find the employee record to get employeeId
+    // First, find the employee record to get employeeId (tenant-scoped)
+    const employeeWhere: any = { id: targetUserId };
+    if (tenantId) {
+      employeeWhere.tenantId = tenantId;
+    }
+    
     const employee = await this.employeeModel.findOne({
-      where: { id: targetUserId }
+      where: employeeWhere
     });
     
     console.log(`🔍 DEBUG employee found:`, employee?.id);
 
-    // Build where clauses to handle both employee self-punched and HR/Admin added attendance
+    // Build where clauses to handle both employee self-punched and HR/Admin added attendance (tenant-scoped)
+    const baseFilter = tenantId ? { tenantId } : {};
     const attendanceWhere = {
       [Op.or]: [
-        { userId: targetUserId, date: day },
-        ...(employee ? [{ employeeId: employee.id, date: day }] : [])
+        { userId: targetUserId, date: day, ...baseFilter },
+        ...(employee ? [{ employeeId: employee.id, date: day, ...baseFilter }] : [])
       ]
     };
     
@@ -645,11 +684,11 @@ export class AttendanceService {
     let sessions: any[] = [];
 
     if (record) {
-      // If we found an attendance record, find sessions linked to it
+      // If we found an attendance record, find sessions linked to it (tenant-scoped)
       // This handles both employee self-punched and HR/Admin added attendance
       const sessionWhere = {
         [Op.and]: [
-          { date: day },
+          { date: day, ...baseFilter }, // Include tenant filter
           {
             [Op.or]: [
               { userId: targetUserId }, // Employee self-punched sessions
@@ -741,8 +780,14 @@ export class AttendanceService {
   }
 
   // Admin/HR: list all attendance with optional date range and status filter (present|late)
-  async listAll(from?: string, to?: string, status?: 'present' | 'late') {
+  async listAll(from?: string, to?: string, status?: 'present' | 'late', tenantId?: string) {
     const where: any = {};
+    
+    // Add tenant filtering
+    if (tenantId) {
+      where.tenantId = tenantId;
+    }
+    
     if (from && to) where.date = { [Op.between]: [from, to] };
     else if (from) where.date = { [Op.gte]: from };
     else if (to) where.date = { [Op.lte]: to };
@@ -767,6 +812,7 @@ export class AttendanceService {
             'department',
             'designation',
           ],
+          where: tenantId ? { tenantId } : undefined, // Filter employees by tenant too
         },
       ],
       order: [['date', 'DESC']],
@@ -775,10 +821,17 @@ export class AttendanceService {
   }
 
   // Admin/HR: list all ABSENT employees for a single day by synthesizing rows
-  async listAllByStatus(day: string, status: 'absent') {
+  async listAllByStatus(day: string, status: 'absent', tenantId?: string) {
     if (!day) throw new BadRequestException('day is required');
-    // Fetch all employees
+    
+    // Fetch all employees (tenant-scoped)
+    const employeeWhere: any = {};
+    if (tenantId) {
+      employeeWhere.tenantId = tenantId;
+    }
+    
     const emps = await this.employeeModel.findAll({
+      where: employeeWhere,
       attributes: [
         'id',
         'name',
@@ -788,9 +841,15 @@ export class AttendanceService {
         'designation',
       ],
     });
-    // Fetch any attendance records for that day
+    
+    // Fetch any attendance records for that day (tenant-scoped)
+    const attendanceWhere: any = { date: day };
+    if (tenantId) {
+      attendanceWhere.tenantId = tenantId;
+    }
+    
     const todays = await this.attendanceModel.findAll({
-      where: { date: day },
+      where: attendanceWhere,
       attributes: ['employeeId', 'checkIn'],
     });
     const presentEmployeeIds = new Set<string>();
@@ -821,7 +880,7 @@ export class AttendanceService {
   }
 
   // Admin/HR: aggregate current week's attendance per weekday (Mon–Fri)
-  async weeklyOverview() {
+  async weeklyOverview(tenantId?: string) {
     // Compute current week's Monday to Sunday range, but only output Mon–Fri
     const today = new Date();
     const day = today.getDay(); // 0..6 (Sun..Sat)
@@ -853,22 +912,38 @@ export class AttendanceService {
       return Number.isFinite(n) ? n : 0;
     };
     try {
+      const employeeWhere: any = { status: 'active' };
+      if (tenantId) {
+        employeeWhere.tenantId = tenantId;
+      }
+      
       const c1 = await (this.employeeModel as any).count({
-        where: { status: 'active' },
+        where: employeeWhere,
       });
       activeEmployees = normalizeCount(c1);
       if (activeEmployees <= 0) {
-        const c2 = await (this.employeeModel as any).count();
+        const fallbackWhere = tenantId ? { tenantId } : {};
+        const c2 = await (this.employeeModel as any).count({
+          where: fallbackWhere,
+        });
         activeEmployees = normalizeCount(c2);
       }
     } catch {
-      const c2 = await (this.employeeModel as any).count();
+      const fallbackWhere = tenantId ? { tenantId } : {};
+      const c2 = await (this.employeeModel as any).count({
+        where: fallbackWhere,
+      });
       activeEmployees = normalizeCount(c2);
     }
 
-    // Fetch all attendance records for this week
+    // Fetch all attendance records for this week (tenant-scoped)
+    const attendanceWhere: any = { date: { [Op.between]: [from, to] } };
+    if (tenantId) {
+      attendanceWhere.tenantId = tenantId;
+    }
+    
     const rows = await this.attendanceModel.findAll({
-      where: { date: { [Op.between]: [from, to] } },
+      where: attendanceWhere,
       attributes: ['userId', 'employeeId', 'date', 'checkIn', 'status'],
       order: [['date', 'ASC']],
     });
@@ -935,15 +1010,19 @@ export class AttendanceService {
     employeeId: string,
     from?: string,
     to?: string,
+    tenantId?: string,
   ) {
     console.log('🔍 DEBUG getEmployeeAttendanceSummary - targetEmployeeId:', employeeId);
     
     // Find employee to get associated user (same pattern as leave service)
     let employee;
     try {
-      // Try to find by employeeId (string) first
+      // Try to find by employeeId (string) first (tenant-scoped)
       employee = await this.employeeModel.findOne({
-        where: { employeeId },
+        where: { 
+          employeeId,
+          tenantId: tenantId 
+        },
         include: [{ model: User, as: 'user' }]
       });
     } catch (error) {
@@ -951,10 +1030,13 @@ export class AttendanceService {
     }
 
     if (!employee) {
-      // Fallback: try to find by UUID if the employeeId looks like a UUID
+      // Fallback: try to find by UUID if the employeeId looks like a UUID (tenant-scoped)
       try {
         employee = await this.employeeModel.findOne({
-          where: { id: employeeId },
+          where: { 
+            id: employeeId,
+            tenantId: tenantId 
+          },
           include: [{ model: User, as: 'user' }]
         });
       } catch (error) {
@@ -983,11 +1065,16 @@ export class AttendanceService {
       dateFilter.date = { [Op.lte]: to };
     }
 
-    // Query attendance using userId (UUID) instead of employeeId (string)
+    // Query attendance using userId (UUID) instead of employeeId (string) (tenant-scoped)
     const whereClause: any = {
       userId: employee.user?.id,
       ...dateFilter
     };
+    
+    // Add tenant filtering
+    if (tenantId) {
+      whereClause.tenantId = tenantId;
+    }
 
     console.log('🔍 DEBUG - Query whereClause:', whereClause);
 
@@ -1031,7 +1118,7 @@ export class AttendanceService {
   }
 
   // Get overall company attendance statistics
-  async getOverallAttendanceStats(from?: string, to?: string) {
+  async getOverallAttendanceStats(from?: string, to?: string, tenantId?: string) {
     const whereClause: any = {};
     
     if (from && to) {
@@ -1041,11 +1128,19 @@ export class AttendanceService {
     } else if (to) {
       whereClause.date = { [Op.lte]: to };
     }
+    
+    // Add tenant filtering
+    if (tenantId) {
+      whereClause.tenantId = tenantId;
+    }
 
-    // Get all employees (assuming all employees are active if no status field)
-    const totalEmployees = await this.employeeModel.count();
+    // Get all employees (tenant-scoped)
+    const employeeWhere = tenantId ? { tenantId } : {};
+    const totalEmployees = await this.employeeModel.count({
+      where: employeeWhere,
+    });
 
-    // Get attendance records
+    // Get attendance records (tenant-scoped)
     const attendanceRecords = await this.attendanceModel.findAll({
       where: whereClause,
       attributes: ['employeeId', 'date', 'status', 'checkIn'],
@@ -1112,21 +1207,32 @@ export class AttendanceService {
   }
 
   // Get attendance statistics by date range with daily breakdown
-  async getAttendanceStatsByDateRange(from: string, to: string) {
+  async getAttendanceStatsByDateRange(from: string, to: string, tenantId?: string) {
+    const whereClause: any = {
+      date: { [Op.between]: [from, to] }
+    };
+    
+    // Add tenant filtering
+    if (tenantId) {
+      whereClause.tenantId = tenantId;
+    }
+    
     const attendanceRecords = await this.attendanceModel.findAll({
-      where: {
-        date: { [Op.between]: [from, to] }
-      },
+      where: whereClause,
       include: [{
         model: this.employeeModel,
-        attributes: ['id', 'firstName', 'lastName', 'email']
+        attributes: ['id', 'firstName', 'lastName', 'email'],
+        where: tenantId ? { tenantId } : undefined, // Filter employees by tenant too
       }],
       attributes: ['employeeId', 'date', 'status', 'checkIn', 'checkOut', 'hoursWorked'],
       order: [['date', 'ASC']]
     });
 
-    // Get total active employees
-    const totalEmployees = await this.employeeModel.count();
+    // Get total active employees (tenant-scoped)
+    const employeeWhere = tenantId ? { tenantId } : {};
+    const totalEmployees = await this.employeeModel.count({
+      where: employeeWhere,
+    });
 
     // Group by date
     const dailyBreakdown = new Map<string, {
@@ -1268,6 +1374,7 @@ export class AttendanceService {
   async addEmployeeAttendance(
     attendanceData: AddEmployeeAttendanceDto,
     user: { id: string; role: string },
+    tenantId: string,
   ) {
     try {
       console.log('🔍 DEBUG: addEmployeeAttendance called with:', { attendanceData, user });
@@ -1309,11 +1416,12 @@ export class AttendanceService {
         userEmail: employee.user?.email
       });
 
-    // Check if attendance record already exists for this date
+    // Check if attendance record already exists for this date (tenant-scoped)
     const existingRecord = await this.attendanceModel.findOne({
       where: {
         userId: employee.user?.id, // Use UUID instead of string employeeId
         date,
+        tenantId: tenantId,
       },
     });
 
@@ -1349,7 +1457,7 @@ export class AttendanceService {
       hoursWorked = Math.max(0, diffMs / (1000 * 60 * 60)); // Convert to hours
     }
 
-    // Create attendance record
+    // Create attendance record (with tenantId)
     const attendanceRecord = await this.attendanceModel.create({
       employeeId: employee.id, // Use employee UUID, not string employeeId
       userId: employee.user?.id, // Use employee's user UUID
@@ -1359,6 +1467,7 @@ export class AttendanceService {
       status,
       hoursWorked,
       notes: description || `Added by ${user.role.toUpperCase()}: ${user.id}`,
+      tenantId: tenantId,
     });
 
     console.log('🔍 DEBUG - Attendance record created:', {
@@ -1368,13 +1477,14 @@ export class AttendanceService {
       date: attendanceRecord.date
     });
 
-    // Create session record to match the behavior of employee self-punch
+    // Create session record to match the behavior of employee self-punch (with tenantId)
     // This ensures the attendance details popup shows session information
     const sessionData: any = {
       attendanceId: attendanceRecord.id,
       userId: employee.user?.id, // Use employee's user UUID, not string employeeId
       date,
       startTime: checkIn,
+      tenantId: tenantId,
     };
 
     // If check-out time is provided, create a completed session
@@ -1420,11 +1530,16 @@ export class AttendanceService {
     }
   }
 
-  async getAttendanceForDate(user: { id: string; email: string; role: string }, date: string) {
+  async getAttendanceForDate(user: { id: string; email: string; role: string }, date: string, tenantId?: string) {
     try {
-      // First, find the employee record for this user
+      // First, find the employee record for this user (tenant-scoped)
+      const employeeWhere: any = { email: user.email };
+      if (tenantId) {
+        employeeWhere.tenantId = tenantId;
+      }
+      
       const employee = await this.employeeModel.findOne({
-        where: { email: user.email }
+        where: employeeWhere
       });
 
       if (!employee) {
@@ -1434,13 +1549,14 @@ export class AttendanceService {
         };
       }
 
-      // Find attendance record for the user on the specified date
+      // Find attendance record for the user on the specified date (tenant-scoped)
       // Check both userId (for self-created records) and employeeId (for HR/Admin-created records)
+      const baseFilter = tenantId ? { tenantId } : {};
       const attendanceRecord = await this.attendanceModel.findOne({
         where: {
           [Op.or]: [
-            { userId: user.id, date: date },
-            { employeeId: employee.id, date: date }
+            { userId: user.id, date: date, ...baseFilter },
+            { employeeId: employee.id, date: date, ...baseFilter }
           ]
         },
         include: [

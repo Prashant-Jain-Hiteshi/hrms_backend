@@ -171,6 +171,17 @@ export class LeaveController {
     return this.leaveService.updateLeaveCreditConfig(leaveType, updateData, tenantId);
   }
 
+  @Delete('credit-config/:leaveType')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Delete leave credit configuration (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Leave credit configuration deleted successfully' })
+  async deleteLeaveCreditConfig(
+    @Param('leaveType') leaveType: string,
+    @TenantId() tenantId: string
+  ) {
+    return this.leaveService.deleteLeaveCreditConfig(leaveType, tenantId);
+  }
+
   // Admin: Manual credit leave
   @Post('manual-credit')
   @Roles('admin')

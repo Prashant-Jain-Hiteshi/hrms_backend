@@ -54,17 +54,17 @@ export class LeaveService {
     );
 
     try {
-      // First, get the requesting employee's UUID
+      // First, get the requesting employee's UUID and tenantId
       let requestingEmployee = await this.employeeModel.findOne({
         where: { employeeId },
-        attributes: ['id'],
+        attributes: ['id', 'tenantId'],
       });
 
       // If not found by employeeId string, try by UUID (fallback)
       if (!requestingEmployee && employeeId) {
         requestingEmployee = await this.employeeModel.findOne({
           where: { id: employeeId },
-          attributes: ['id'],
+          attributes: ['id', 'tenantId'],
         });
       }
 
@@ -74,6 +74,7 @@ export class LeaveService {
       }
 
       const requestingEmployeeUuid = requestingEmployee.id;
+      const tenantId = requestingEmployee.tenantId;
 
       // Validate TO employees exist
       const toEmployeesExist = await this.employeeModel.findAll({
@@ -105,6 +106,7 @@ export class LeaveService {
       const leaveRequest = await this.leaveRequestModel.create({
         ...leaveData,
         employeeId: requestingEmployeeUuid, // Use UUID instead of string
+        tenantId: tenantId, // Add tenantId from employee
         status: 'pending',
       });
 
@@ -864,40 +866,75 @@ export class LeaveService {
 
   // Leave Credit Configuration Methods - Tenant-aware
   async configureLeaveCreditConfig(configData: any, tenantId: string) {
-    const leaveType = String(configData.leaveType).toLowerCase();
-    const monthlyCredit = Number(configData.monthlyCredit);
-    const isActive = configData.isActive !== false;
+    try {
+      console.log('🔍 DEBUG configureLeaveCreditConfig - Input:', { configData, tenantId });
+      
+      const leaveType = String(configData.leaveType);
+      const monthlyCredit = Number(configData.monthlyCredit);
+      const isActive = configData.isActive !== false;
 
-    if (!leaveType || Number.isNaN(monthlyCredit)) {
-      throw new BadRequestException('leaveType and monthlyCredit are required');
+      console.log('🔍 DEBUG - Processed values:', { leaveType, monthlyCredit, isActive });
+
+      if (!leaveType || Number.isNaN(monthlyCredit)) {
+        throw new BadRequestException('leaveType and monthlyCredit are required');
+      }
+
+      // Upsert by unique leaveType within tenant
+      console.log('🔍 DEBUG - About to findOrCreate');
+      const [record, created] = await this.leaveCreditConfigModel.findOrCreate({
+        where: { leaveType, tenantId },
+        defaults: { leaveType, monthlyCredit, isActive, tenantId },
+      });
+
+      console.log('🔍 DEBUG - findOrCreate result:', { created, recordId: record?.id });
+
+      if (!created) {
+        console.log('🔍 DEBUG - Updating existing record');
+        await record.update({ monthlyCredit, isActive });
+        console.log('🔍 DEBUG - Update completed');
+      }
+
+      // Return the record directly instead of refetching
+      const finalRecord = !created ? await record.reload() : record;
+      console.log('🔍 DEBUG - Final record prepared');
+      
+      const result = {
+        leaveType: finalRecord.leaveType,
+        monthlyCredit: finalRecord.monthlyCredit,
+        isActive: finalRecord.isActive,
+        updatedAt: finalRecord.updatedAt,
+        createdAt: finalRecord.createdAt,
+      };
+
+      console.log('🔍 DEBUG - Returning result:', result);
+      return result;
+    } catch (error) {
+      console.error('🔍 ERROR in configureLeaveCreditConfig:', error);
+      throw error;
     }
+  }
 
-    // Upsert by unique leaveType within tenant
-    const [record, created] = await this.leaveCreditConfigModel.findOrCreate({
-      where: { leaveType, tenantId },
-      defaults: { leaveType, monthlyCredit, isActive, tenantId },
-    });
+  async deleteLeaveCreditConfig(leaveType: string, tenantId: string) {
+    try {
+      console.log('🔍 DEBUG deleteLeaveCreditConfig - Input:', { leaveType, tenantId });
+      
+      const deleted = await this.leaveCreditConfigModel.destroy({
+        where: { leaveType, tenantId }
+      });
 
-    if (!created) {
-      await record.update({ monthlyCredit, isActive });
+      if (deleted === 0) {
+        throw new NotFoundException(`Leave credit configuration for '${leaveType}' not found`);
+      }
+
+      console.log('🔍 DEBUG - Delete successful, rows affected:', deleted);
+      return { 
+        message: `Leave credit configuration for '${leaveType}' deleted successfully`,
+        deleted: true 
+      };
+    } catch (error) {
+      console.error('🔍 ERROR in deleteLeaveCreditConfig:', error);
+      throw error;
     }
-
-    // Refetch to ensure all fields are populated from DB
-    const saved = await this.leaveCreditConfigModel.findOne({
-      where: { leaveType, tenantId },
-      attributes: ['leaveType', 'monthlyCredit', 'isActive', 'updatedAt', 'createdAt'],
-      raw: true,
-    });
-    if (!saved) {
-      throw new NotFoundException('Failed to persist configuration');
-    }
-    return {
-      leaveType: saved.leaveType,
-      monthlyCredit: saved.monthlyCredit as unknown as number,
-      isActive: saved.isActive as unknown as boolean,
-      updatedAt: saved.updatedAt as unknown as Date,
-      createdAt: saved.createdAt as unknown as Date,
-    };
   }
 
   // Tenant-aware leave credit configurations

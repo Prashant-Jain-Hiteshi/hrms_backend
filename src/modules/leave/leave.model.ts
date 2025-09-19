@@ -40,26 +40,9 @@ export class LeaveRequest extends Model {
 
   @AllowNull(false)
   @Column({
-    type: DataType.ENUM(
-      'sick',
-      'casual',
-      'annual',
-      'maternity',
-      'paternity',
-      'emergency',
-      'other',
-      'bereavement',
-    ),
+    type: DataType.STRING(100),
   })
-  declare leaveType:
-    | 'sick'
-    | 'casual'
-    | 'annual'
-    | 'maternity'
-    | 'paternity'
-    | 'emergency'
-    | 'other'
-    | 'bereavement';
+  declare leaveType: string;
 
   @AllowNull(false)
   @Column(DataType.DATEONLY)

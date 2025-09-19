@@ -30,7 +30,7 @@ export class LeaveCredit extends Model<LeaveCredit, LeaveCreditCreationAttribute
   employeeId: string;
 
   @Column({
-    type: DataType.ENUM('annual', 'sick', 'personal', 'maternity', 'paternity', 'casual'),
+    type: DataType.STRING(100),
     allowNull: false,
   })
   leaveType: string;
@@ -96,7 +96,7 @@ export class LeaveCreditConfig extends Model<LeaveCreditConfig, LeaveCreditConfi
   declare id: number;
 
   @Column({
-    type: DataType.ENUM('annual', 'sick', 'personal', 'maternity', 'paternity', 'casual'),
+    type: DataType.STRING(100),
     allowNull: false,
   })
   leaveType: string;
