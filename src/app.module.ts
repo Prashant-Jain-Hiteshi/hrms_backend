@@ -27,7 +27,7 @@ import { SuperAdminModule } from './modules/super-admin/super-admin.module';
           ? { ssl: { require: true, rejectUnauthorized: false } }
           : {};
 
-        const dbSync = config.get('DB_SYNC', 'false') === 'true';
+        const dbSync = true; // Temporarily force sync to add missing columns
         console.log('🔧 Database Configuration:');
         console.log('  - DB_SYNC:', config.get('DB_SYNC', 'false'), '→', dbSync);
         console.log('  - Host:', config.get('DB_HOST', 'localhost'));

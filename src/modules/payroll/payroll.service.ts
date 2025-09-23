@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import { Op } from 'sequelize';
 import { Employee } from '../employees/employees.model';
@@ -291,4 +291,5 @@ export class PayrollService {
 
     return summary;
   }
+
 }

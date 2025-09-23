@@ -41,6 +41,18 @@ export class Company extends Model {
   @Column(DataType.TEXT)
   declare address?: string;
 
+  // @AllowNull(true)
+  // @Column(DataType.STRING)
+  // declare city?: string;
+
+  // @AllowNull(true)
+  // @Column(DataType.STRING)
+  // declare state?: string;
+
+  // @AllowNull(true)
+  // @Column(DataType.STRING)
+  // declare pincode?: string;
+
   @AllowNull(true)
   @Column(DataType.STRING)
   declare phone?: string;
@@ -56,6 +68,8 @@ export class Company extends Model {
   @AllowNull(true)
   @Column(DataType.STRING)
   declare logoUrl?: string;
+
+  // Note: Payroll configuration moved to separate CompanyPayrollInfo table
 
   // Note: Associations with Employee and User are defined via foreign keys
   // The relationships are established through tenantId foreign key
