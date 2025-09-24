@@ -1,7 +1,10 @@
 // Export all payroll setup models
-export { PayComponent, ComponentType, CalculationMethod } from './pay-components.model';
-export { CompanyBankAccount } from './company-bank-accounts.model';
-export { SalaryTemplate, SalaryTemplateComponent } from './salary-templates.model';
+export * from './pay-components.model';
+export * from './company-payroll-info.model';
+export * from './company-bank-accounts.model';
+export * from './salary-templates.model';
+export * from './statutory-settings.model';
+export * from './employee-payroll-record.model';
 export { StatutorySettings } from './statutory-settings.model';
 
 // Export existing payroll model

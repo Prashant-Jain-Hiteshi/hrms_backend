@@ -37,10 +37,7 @@ export class StatutorySettings extends Model {
   @Column({ type: DataType.DECIMAL(5, 2) })
   declare pfEmployeeRate: number; // Employee contribution %
 
-  @AllowNull(false)
-  @Default(12)
-  @Column({ type: DataType.DECIMAL(5, 2) })
-  declare pfEmployerRate: number; // Employer contribution %
+ 
 
   // ESI Settings
   @AllowNull(false)
@@ -53,11 +50,7 @@ export class StatutorySettings extends Model {
   @Column({ type: DataType.DECIMAL(5, 2) })
   declare esiEmployeeRate: number; // Employee contribution %
 
-  @AllowNull(false)
-  @Default(3.25)
-  @Column({ type: DataType.DECIMAL(5, 2) })
-  declare esiEmployerRate: number; // Employer contribution %
-
+  
   // Professional Tax Settings
   @AllowNull(false)
   @Default(200)

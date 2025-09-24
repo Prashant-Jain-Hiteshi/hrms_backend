@@ -27,13 +27,16 @@ import { SuperAdminModule } from './modules/super-admin/super-admin.module';
           ? { ssl: { require: true, rejectUnauthorized: false } }
           : {};
 
-        const dbSync = true; // Temporarily force sync to add missing columns
+        const dbSync = config.get('DB_SYNC', 'false') === 'true';
+        const dbForce = config.get('DB_FORCE', 'false') === 'true'; // Add force option
         console.log('🔧 Database Configuration:');
         console.log('  - DB_SYNC:', config.get('DB_SYNC', 'false'), '→', dbSync);
+        console.log('  - DB_FORCE:', config.get('DB_FORCE', 'false'), '→', dbForce);
         console.log('  - Host:', config.get('DB_HOST', 'localhost'));
         console.log('  - Database:', config.get('DB_NAME', 'hrm_db'));
         console.log('  - AutoLoadModels: true');
         console.log('  - Synchronize:', dbSync);
+        console.log('  - Force:', dbForce);
 
         return {
           dialect: 'postgres',
@@ -44,8 +47,10 @@ import { SuperAdminModule } from './modules/super-admin/super-admin.module';
           password: config.get('DB_PASS', 'postgres'),
           autoLoadModels: true,
           synchronize: dbSync,
+          // sync: { alter: true }, // Disabled - causes foreign key conflicts with existing data
           logging,
           dialectOptions,
+        
         } as any;
       },
     }),

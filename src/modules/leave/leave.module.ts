@@ -20,6 +20,7 @@ import { CalendarService } from './calendar.service';
 import { CompensatoryLeave } from './compensatory-leave.model';
 import { CompensatoryLeaveController } from './compensatory-leave.controller';
 import { CompensatoryLeaveService } from './compensatory-leave.service';
+import { EmployeeMonthlyLeaveRecord } from './models/employee-monthly-leave-record.model';
 import { User } from '../users/users.model';
 import { Company } from '../companies/companies.model';
 
@@ -37,6 +38,7 @@ import { Company } from '../companies/companies.model';
       Holiday,
       WeekendSetting,
       CompensatoryLeave,
+      EmployeeMonthlyLeaveRecord,
       User,
       Company,
     ]),

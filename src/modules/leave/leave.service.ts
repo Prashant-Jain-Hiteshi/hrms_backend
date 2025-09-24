@@ -18,6 +18,7 @@ import { User } from '../users/users.model';
 import { CreateLeaveDto, UpdateLeaveStatusDto } from './dto/create-leave.dto';
 import { LeaveStatus } from './leave.types';
 import { LeaveCredit, LeaveCreditConfig } from './leave-credit.model';
+import { EmployeeMonthlyLeaveRecord } from './models/employee-monthly-leave-record.model';
 import { CompensatoryLeaveService } from './compensatory-leave.service';
 
 @Injectable()
@@ -38,6 +39,8 @@ export class LeaveService {
     private leaveCreditModel: typeof LeaveCredit,
     @InjectModel(LeaveCreditConfig)
     private leaveCreditConfigModel: typeof LeaveCreditConfig,
+    @InjectModel(EmployeeMonthlyLeaveRecord)
+    private employeeMonthlyLeaveRecordModel: typeof EmployeeMonthlyLeaveRecord,
     private compensatoryLeaveService: CompensatoryLeaveService,
   ) {}
 
@@ -1372,6 +1375,137 @@ export class LeaveService {
       console.error('🚨 ERROR in getMonthlyLedger:', error);
       console.error('🚨 ERROR Stack:', error.stack);
       throw error;
+    }
+  }
+
+  // New method to save/update monthly leave records (called when employee checks Leave Balance UI)
+  async saveMonthlyLeaveRecords(employeeId: string, monthlyRecords: any[]): Promise<void> {
+    try {
+      console.log(`🔍 DEBUG - Saving monthly leave records for employee ${employeeId}:`, monthlyRecords);
+
+      // Get employee UUID and tenantId
+      let employee = await this.employeeModel.findOne({
+        where: { employeeId },
+        attributes: ['id', 'tenantId'],
+      });
+
+      // Fallback: try by UUID if string lookup fails
+      if (!employee && employeeId) {
+        employee = await this.employeeModel.findOne({
+          where: { id: employeeId },
+          attributes: ['id', 'tenantId'],
+        });
+      }
+
+      if (!employee) {
+        throw new NotFoundException(`Employee not found: ${employeeId}`);
+      }
+
+      const employeeUuid = employee.id;
+      const tenantId = employee.tenantId;
+
+      // Process each monthly record
+      for (const monthlyRecord of monthlyRecords) {
+        const [year, monthNum] = monthlyRecord.ym.split('-').map(Number);
+        
+        // Helper function to safely convert to number (handles NaN)
+        const safeNumber = (value: any): number => {
+          const num = Number(value || 0);
+          return isNaN(num) ? 0 : num;
+        };
+
+        // Prepare the data to save (matching your UI columns exactly)
+        const recordData = {
+          employeeId: employeeUuid,
+          tenantId,
+          month: monthlyRecord.ym,
+          year,
+          opening: safeNumber(monthlyRecord.opening),
+          monthlyCredit: safeNumber(monthlyRecord.monthlyCredit),
+          extraCredit: safeNumber(monthlyRecord.extraCredit),
+          deducted: safeNumber(monthlyRecord.deducted),
+          lwp: safeNumber(monthlyRecord.lwp),
+          closing: safeNumber(monthlyRecord.closing),
+          present: safeNumber(monthlyRecord.present),
+          absent: safeNumber(monthlyRecord.absent),
+          effectivePresent: safeNumber(monthlyRecord.effPresent || monthlyRecord.effectivePresent),
+          effectiveAbsent: safeNumber(monthlyRecord.effAbsent || monthlyRecord.effectiveAbsent),
+          paidDays: safeNumber(monthlyRecord.paidDays), // This is the key field for payroll
+          extraCreditBreakdown: monthlyRecord.extraCreditBreakdown || '',
+          calculatedAt: new Date(),
+        };
+
+        console.log(`🔍 DEBUG - Record data for ${monthlyRecord.ym}:`, recordData);
+
+        // Use findOrCreate to handle unique constraint properly
+        const [dbRecord, created] = await this.employeeMonthlyLeaveRecordModel.findOrCreate({
+          where: {
+            employeeId: employeeUuid,
+            month: monthlyRecord.ym,
+            tenantId,
+          },
+          defaults: recordData,
+        });
+
+        // If record exists, update it
+        if (!created) {
+          await dbRecord.update(recordData);
+        }
+
+        console.log(`🔍 DEBUG - Saved/updated record for ${monthlyRecord.ym}: paidDays=${recordData.paidDays}`);
+      }
+
+      console.log(`✅ Successfully saved ${monthlyRecords.length} monthly leave records for employee ${employeeId}`);
+
+    } catch (error) {
+      console.error(`❌ ERROR - Failed to save monthly leave records for employee ${employeeId}:`, error);
+      throw error;
+    }
+  }
+
+  // Method to get stored paid days for payroll calculation
+  async getStoredPaidDays(employeeId: string, month: string): Promise<number> {
+    try {
+      // Get employee UUID
+      let employee = await this.employeeModel.findOne({
+        where: { employeeId },
+        attributes: ['id', 'tenantId'],
+      });
+
+      // Fallback: try by UUID if string lookup fails
+      if (!employee && employeeId) {
+        employee = await this.employeeModel.findOne({
+          where: { id: employeeId },
+          attributes: ['id', 'tenantId'],
+        });
+      }
+
+      if (!employee) {
+        console.log(`🔍 DEBUG - Employee not found for paid days lookup: ${employeeId}`);
+        return 0;
+      }
+
+      // Find the stored monthly record
+      const record = await this.employeeMonthlyLeaveRecordModel.findOne({
+        where: {
+          employeeId: employee.id,
+          month,
+          tenantId: employee.tenantId,
+        },
+        attributes: ['paidDays', 'calculatedAt'],
+      });
+
+      if (record) {
+        console.log(`🔍 DEBUG - Found stored paid days for ${employeeId}, ${month}: ${record.paidDays} (calculated at: ${record.calculatedAt})`);
+        return Number(record.paidDays || 0);
+      } else {
+        console.log(`🔍 DEBUG - No stored paid days found for ${employeeId}, ${month}`);
+        return 0;
+      }
+
+    } catch (error) {
+      console.error(`❌ ERROR - Failed to get stored paid days for ${employeeId}, ${month}:`, error);
+      return 0;
     }
   }
 }

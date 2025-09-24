@@ -8,6 +8,8 @@ import {
   Delete,
   Query,
   UseGuards,
+  Put,
+  Req,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -24,9 +26,12 @@ import {
   PayrollCalculationDto,
   PayrollCalculationResponseDto,
 } from './dto/dynamic-payroll.dto';
+import { CalculatePayrollBatchDto, AdjustPayrollDto, BulkApprovePayrollDto } from './dto/hr-payroll.dto';
+import { HRPayrollCalculationService } from './services/hr-payroll-calculation.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { TenantId } from '../auth/decorators/tenant-id.decorator';
 import { UserRole } from '../users/user-role.enum';
 
 @ApiTags('payroll')
@@ -34,7 +39,10 @@ import { UserRole } from '../users/user-role.enum';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('payroll')
 export class PayrollController {
-  constructor(private readonly payrollService: PayrollService) {}
+  constructor(
+    private readonly payrollService: PayrollService,
+    private readonly hrPayrollService: HRPayrollCalculationService,
+  ) {}
 
   @Post()
   @Roles(UserRole.ADMIN, UserRole.HR)
@@ -195,5 +203,103 @@ export class PayrollController {
     @Query('periodEnd') periodEnd: string,
   ) {
     return this.payrollService.getPayrollSummary(periodStart, periodEnd);
+  }
+
+  // HR Payroll Management Endpoints
+  @Post('hr/calculate-batch')
+  @Roles(UserRole.HR, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Calculate payroll for multiple employees' })
+  @ApiResponse({
+    status: 201,
+    description: 'Payroll calculated successfully for batch of employees.',
+  })
+  async calculatePayrollBatch(
+    @Body() calculateDto: CalculatePayrollBatchDto,
+    @TenantId() tenantId: string,
+    @Req() request: any,
+  ) {
+    console.log('🔍 DEBUG - Calculate Payroll Batch Request:', {
+      calculateDto,
+      tenantId,
+      user: request.user,
+    });
+    
+    // Get current user ID from JWT token
+    const calculatedBy = request.user?.id || request.user?.userId;
+    
+    if (!calculatedBy) {
+      throw new Error('Unable to determine user ID from JWT token');
+    }
+    
+    console.log('🔍 DEBUG - Using calculatedBy from JWT:', calculatedBy);
+    
+    const result = await this.hrPayrollService.calculatePayrollBatch({
+      ...calculateDto,
+      calculatedBy,
+      tenantId,
+    });
+    
+    console.log('🔍 DEBUG - Calculate Payroll Batch Result:', result);
+    
+    return result;
+  }
+
+  @Get('hr/records/:month')
+  @Roles(UserRole.HR, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Get payroll records for a specific month' })
+  @ApiResponse({
+    status: 200,
+    description: 'Payroll records retrieved successfully.',
+  })
+  async getPayrollRecords(
+    @Param('month') month: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.hrPayrollService.getPayrollRecords(month, tenantId);
+  }
+
+  @Get('hr/summary/:month')
+  @Roles(UserRole.HR, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Get payroll summary for a specific month' })
+  @ApiResponse({
+    status: 200,
+    description: 'Payroll summary retrieved successfully.',
+  })
+  async getPayrollSummaryByMonth(
+    @Param('month') month: string,
+    @TenantId() tenantId: string,
+  ) {
+    return this.hrPayrollService.getPayrollSummary(month, tenantId);
+  }
+
+  @Put('hr/adjust/:recordId')
+  @Roles(UserRole.HR, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Adjust individual payroll record' })
+  @ApiResponse({
+    status: 200,
+    description: 'Payroll record adjusted successfully.',
+  })
+  async adjustPayroll(
+    @Param('recordId') recordId: string,
+    @Body() adjustDto: AdjustPayrollDto,
+    @TenantId() tenantId: string,
+  ) {
+    // TODO: Implement adjustment logic
+    return { message: 'Payroll adjustment functionality coming soon', recordId, adjustDto };
+  }
+
+  @Post('hr/approve-bulk')
+  @Roles(UserRole.HR, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Bulk approve payroll records' })
+  @ApiResponse({
+    status: 200,
+    description: 'Payroll records approved successfully.',
+  })
+  async bulkApprovePayroll(
+    @Body() approveDto: BulkApprovePayrollDto,
+    @TenantId() tenantId: string,
+  ) {
+    // TODO: Implement bulk approval logic
+    return { message: 'Bulk approval functionality coming soon', approveDto };
   }
 }

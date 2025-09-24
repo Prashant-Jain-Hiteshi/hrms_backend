@@ -385,4 +385,39 @@ export class LeaveController {
   async getOverallStatistics() {
     return this.leaveService.getLeaveStatistics();
   }
+
+  @Post('save-monthly-records')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ 
+    summary: 'Save monthly leave records from Leave Balance UI',
+    description: 'Called when employee views Leave Balance to store calculated paid days for payroll'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Monthly records saved successfully',
+  })
+  async saveMonthlyLeaveRecords(
+    @Request() req: { user: AuthUser },
+    @Body() body: { monthlyRecords: any[] }
+  ) {
+    const user = req.user;
+    console.log('🔍 DEBUG - Save monthly records request:', {
+      userId: user.id,
+      employeeId: user.employeeId,
+      recordCount: body.monthlyRecords?.length || 0
+    });
+
+    if (!body.monthlyRecords || !Array.isArray(body.monthlyRecords)) {
+      throw new BadRequestException('monthlyRecords array is required');
+    }
+
+    await this.leaveService.saveMonthlyLeaveRecords(user.employeeId, body.monthlyRecords);
+    
+    return {
+      success: true,
+      message: `Saved ${body.monthlyRecords.length} monthly leave records`,
+      recordCount: body.monthlyRecords.length
+    };
+  }
 }
