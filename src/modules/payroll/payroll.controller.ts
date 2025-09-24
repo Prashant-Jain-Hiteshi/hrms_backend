@@ -3,12 +3,13 @@ import {
   Get,
   Post,
   Body,
-  Patch,
   Param,
-  Delete,
   Query,
-  UseGuards,
   Put,
+  Patch,
+  Delete,
+  Request,
+  UseGuards,
   Req,
 } from '@nestjs/common';
 import {
@@ -245,7 +246,7 @@ export class PayrollController {
   }
 
   @Get('hr/records/:month')
-  @Roles(UserRole.HR, UserRole.ADMIN)
+  @Roles(UserRole.HR, UserRole.ADMIN, UserRole.FINANCE)
   @ApiOperation({ summary: 'Get payroll records for a specific month' })
   @ApiResponse({
     status: 200,
@@ -259,7 +260,7 @@ export class PayrollController {
   }
 
   @Get('hr/summary/:month')
-  @Roles(UserRole.HR, UserRole.ADMIN)
+  @Roles(UserRole.HR, UserRole.ADMIN, UserRole.FINANCE)
   @ApiOperation({ summary: 'Get payroll summary for a specific month' })
   @ApiResponse({
     status: 200,
@@ -284,8 +285,55 @@ export class PayrollController {
     @Body() adjustDto: AdjustPayrollDto,
     @TenantId() tenantId: string,
   ) {
-    // TODO: Implement adjustment logic
-    return { message: 'Payroll adjustment functionality coming soon', recordId, adjustDto };
+    console.log('🔧 DEBUG - Adjust Payroll Request:', {
+      recordId,
+      adjustDto,
+      tenantId,
+    });
+    
+    return await this.hrPayrollService.adjustPayroll(recordId, adjustDto, tenantId);
+  }
+
+  @Get('hr/eligible-employees/:month')
+  @Roles(UserRole.HR, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Get employees eligible for payroll calculation for specific month' })
+  @ApiResponse({
+    status: 200,
+    description: 'Eligible employees retrieved successfully.',
+  })
+  async getEligibleEmployees(
+    @Param('month') month: string, // Format: YYYY-MM
+    @TenantId() tenantId: string,
+  ) {
+    return await this.hrPayrollService.getEligibleEmployees(month, tenantId);
+  }
+
+  @Put('hr/approve/:recordId')
+  @Roles(UserRole.HR, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Approve individual payroll record' })
+  @ApiResponse({
+    status: 200,
+    description: 'Payroll record approved successfully.',
+  })
+  async approvePayroll(
+    @Param('recordId') recordId: string,
+    @Body() body: { approvalNotes?: string },
+    @TenantId() tenantId: string,
+    @Request() req: any,
+  ) {
+    console.log('🔧 DEBUG - Individual Approve Payroll Request:', {
+      recordId,
+      body,
+      tenantId,
+      userId: req.user?.id
+    });
+    
+    return await this.hrPayrollService.bulkApprovePayroll(
+      [recordId], // Single record as array
+      body.approvalNotes || 'Approved by HR',
+      req.user?.id, // approverId
+      tenantId
+    );
   }
 
   @Post('hr/approve-bulk')
@@ -298,8 +346,47 @@ export class PayrollController {
   async bulkApprovePayroll(
     @Body() approveDto: BulkApprovePayrollDto,
     @TenantId() tenantId: string,
+    @Request() req: any,
   ) {
-    // TODO: Implement bulk approval logic
-    return { message: 'Bulk approval functionality coming soon', approveDto };
+    console.log('🔧 DEBUG - Bulk Approve Payroll Request:', {
+      approveDto,
+      tenantId,
+      userId: req.user?.id
+    });
+    
+    return await this.hrPayrollService.bulkApprovePayroll(
+      approveDto.payrollRecordIds,
+      approveDto.approvalNotes || 'Bulk approved by HR',
+      req.user?.id, // approverId
+      tenantId
+    );
+  }
+
+  @Get('hr/dashboard-summary/:month')
+  @Roles(UserRole.HR, UserRole.ADMIN, UserRole.FINANCE)
+  @ApiOperation({ summary: 'Get dashboard summary for HR/Finance overview' })
+  @ApiResponse({
+    status: 200,
+    description: 'Dashboard summary retrieved successfully.',
+  })
+  async getDashboardSummary(
+    @Param('month') month: string,
+    @TenantId() tenantId: string,
+  ) {
+    return await this.hrPayrollService.getDashboardSummary(month, tenantId);
+  }
+
+  @Get('hr/department-breakdown/:month')
+  @Roles(UserRole.HR, UserRole.ADMIN, UserRole.FINANCE)
+  @ApiOperation({ summary: 'Get department-wise salary breakdown for HR/Finance' })
+  @ApiResponse({
+    status: 200,
+    description: 'Department breakdown retrieved successfully.',
+  })
+  async getDepartmentBreakdown(
+    @Param('month') month: string,
+    @TenantId() tenantId: string,
+  ) {
+    return await this.hrPayrollService.getDepartmentBreakdown(month, tenantId);
   }
 }

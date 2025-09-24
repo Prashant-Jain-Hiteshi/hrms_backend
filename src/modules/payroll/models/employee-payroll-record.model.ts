@@ -70,6 +70,11 @@ export class EmployeePayrollRecord extends Model {
   declare allowances: object;
 
   @AllowNull(false)
+  @Default(0)
+  @Column({ type: DataType.DECIMAL(10, 2) })
+  declare totalAllowances: number;
+
+  @AllowNull(false)
   @Column({ type: DataType.DECIMAL(12, 2) })
   declare grossSalary: number;
 

@@ -152,16 +152,21 @@ export class HRPayrollCalculationService {
     // 3. Get paid days directly from stored monthly leave records table
     const storedPaidDays = await this.leaveService.getStoredPaidDays(employee.employeeId, month);
     
-    if (storedPaidDays <= 0) {
-      // No stored data found - employee hasn't used Leave Balance feature yet
-      throw new Error(`No paid days data found for ${employee.name} in ${month}. Employee must visit Leave Balance tab first to calculate and save monthly records.`);
-    }
-
-    // Use stored paid days from employee_monthly_leave_records table
-    const finalPaidDays = storedPaidDays;
-    const finalUnpaidDays = Math.max(0, workingDays - finalPaidDays);
+    let finalPaidDays: number;
+    let finalUnpaidDays: number;
     
-    console.log(`✅ DEBUG - Using stored paid days from employee_monthly_leave_records table:`, {
+    if (storedPaidDays <= 0) {
+      // No stored data found - use default values (0 paid days)
+      console.log(`⚠️  WARNING - No paid days data found for ${employee.name} in ${month}. Using default 0 paid days.`);
+      finalPaidDays = 0; // Default to 0 paid days
+      finalUnpaidDays = workingDays; // All days are unpaid
+    } else {
+      // Use stored paid days from employee_monthly_leave_records table
+      finalPaidDays = storedPaidDays;
+      finalUnpaidDays = Math.max(0, workingDays - finalPaidDays);
+    }
+    
+    console.log(`✅ DEBUG - Paid days calculation result:`, {
       employeeId: employee.employeeId,
       employeeName: employee.name,
       month,
@@ -169,7 +174,7 @@ export class HRPayrollCalculationService {
       finalPaidDays,
       finalUnpaidDays,
       workingDays,
-      source: 'employee_monthly_leave_records table (calculated by Leave Balance UI)',
+      source: storedPaidDays > 0 ? 'employee_monthly_leave_records table (calculated by Leave Balance UI)' : 'default values (0 paid days)',
     });
 
     this.logger.log(`Employee ${employee.name}: Working Days: ${workingDays}, Paid Days: ${finalPaidDays}, Unpaid Days: ${finalUnpaidDays}`);
@@ -193,14 +198,51 @@ export class HRPayrollCalculationService {
       paidDaysSource: 'Stored from employee_monthly_leave_records table',
     });
 
-    // 5. Set allowances to 0 by default (as per user requirement)
-    const proRatedAllowances = 0;
-    // Note: Allowances are set to 0 by default for all employees
+    // 5. Calculate allowances from pay components (EARNING type)
+    let totalAllowances = 0;
     
-    console.log(`🔍 DEBUG - Allowances set to 0 for ${employee.name} (default policy)`);
+    console.log(`🔍 DEBUG - Pay components available for ${employee.name}:`, {
+      totalComponents: payComponents.length,
+      components: payComponents.map(c => ({ name: c.name, type: c.type, value: c.value, calculationMethod: c.calculationMethod }))
+    });
+    
+    for (const component of payComponents) {
+      if (component.type === 'EARNING') {
+        const componentValue = this.calculateComponentValue(component, proRatedBaseSalary);
+        const componentKey = component.name.toLowerCase().replace(/\s+/g, '_');
+        allowances[componentKey] = componentValue;
+        totalAllowances += componentValue;
+        
+        console.log(`💰 EARNING component added:`, {
+          name: component.name,
+          key: componentKey,
+          value: componentValue,
+          calculationMethod: component.calculationMethod,
+          baseSalary: proRatedBaseSalary
+        });
+      }
+    }
+    
+    console.log(`🔍 DEBUG - Final allowances calculated for ${employee.name}:`, {
+      allowances,
+      totalAllowances,
+      source: 'Pay components configuration',
+      isEmpty: Object.keys(allowances).length === 0
+    });
 
-    // 6. Calculate gross salary (pro-rated base + allowances = pro-rated base only)
-    const grossSalary = proRatedBaseSalary + proRatedAllowances;
+    // 6. Calculate gross salary (pro-rated base + total allowances)
+    let grossSalary = proRatedBaseSalary + totalAllowances;
+    
+    // Note: Allowances start empty and are added by HR through the Adjust modal in the UI
+    // This follows the same pattern as deductions - HR can add allowances as needed
+    if (totalAllowances === 0 && Object.keys(allowances).length === 0) {
+      console.log(`📝 INFO - No initial allowances for ${employee.name}. HR can add allowances via Adjust modal.`, {
+        proRatedBaseSalary,
+        totalAllowances,
+        grossSalary,
+        note: 'Allowances can be added through UI adjustment feature'
+      });
+    }
     
     // 7. Calculate deductions (PF, ESI, etc.) based on gross salary
     for (const component of payComponents) {
@@ -222,10 +264,23 @@ export class HRPayrollCalculationService {
     const finalTotalDeductions = totalDeductions;
     const netSalary = grossSalary - finalTotalDeductions;
 
+    // 10. Detailed calculation breakdown for verification
+    console.log(`📊 DETAILED SALARY CALCULATION FOR ${employee.name}:`, {
+      step1_baseSalary: `₹${baseSalary}`,
+      step2_proRatedBaseSalary: `₹${Math.round(proRatedBaseSalary * 100) / 100}`,
+      step3_allowancesBreakdown: allowances,
+      step4_totalAllowances: `₹${Math.round(totalAllowances * 100) / 100}`,
+      step5_grossSalary: `₹${Math.round(grossSalary * 100) / 100} (${Math.round(proRatedBaseSalary * 100) / 100} + ${Math.round(totalAllowances * 100) / 100})`,
+      step6_deductionsBreakdown: deductions,
+      step7_totalDeductions: `₹${Math.round(finalTotalDeductions * 100) / 100}`,
+      step8_netSalary: `₹${Math.round(netSalary * 100) / 100} (${Math.round(grossSalary * 100) / 100} - ${Math.round(finalTotalDeductions * 100) / 100})`,
+      verification: `${Math.round(proRatedBaseSalary * 100) / 100} + ${Math.round(totalAllowances * 100) / 100} - ${Math.round(finalTotalDeductions * 100) / 100} = ${Math.round(netSalary * 100) / 100}`
+    });
+
     this.logger.log(`Employee ${employee.name} calculation:`, {
       originalBaseSalary: baseSalary,
       proRatedBaseSalary: Math.round(proRatedBaseSalary * 100) / 100,
-      proRatedAllowances,
+      totalAllowances: Math.round(totalAllowances * 100) / 100,
       grossSalary: Math.round(grossSalary * 100) / 100,
       totalDeductions: Math.round(totalDeductions * 100) / 100,
       lwpDeduction,
@@ -254,6 +309,7 @@ export class HRPayrollCalculationService {
       await existingRecord.update({
         baseSalary: proRatedBaseSalary, // Use pro-rated base salary
         allowances,
+        totalAllowances,
         grossSalary,
         deductions,
         lwpDeduction,
@@ -286,6 +342,7 @@ export class HRPayrollCalculationService {
         year,
         baseSalary: proRatedBaseSalary, // Use pro-rated base salary
         allowances,
+        totalAllowances,
         grossSalary,
         deductions,
         lwpDeduction,
@@ -535,11 +592,456 @@ export class HRPayrollCalculationService {
       });
     }
 
-    return {
-      deductions,
-      total: Math.round(total * 100) / 100,
-    };
+    return { deductions, total: Math.round(total * 100) / 100 };
   }
 
-  // Note: Removed old complex calculation methods since we now use stored paid days directly from employee_monthly_leave_records table
+  // Adjust payroll record without creating new table - use existing JSON fields
+  async adjustPayroll(recordId: string, adjustmentData: {
+    adjustmentType: 'ALLOWANCE' | 'DEDUCTION';
+    adjustmentName: string;
+    amount: number;
+    reason?: string;
+  }, tenantId: string): Promise<any> {
+    console.log(`🔧 PAYROLL ADJUSTMENT STARTED:`, {
+      recordId,
+      adjustmentData,
+      tenantId,
+      method: 'adjustPayroll'
+    });
+
+    try {
+      // Find the payroll record
+      const payrollRecord = await this.payrollRecordModel.findOne({
+        where: { id: recordId, tenantId },
+        include: [{ model: this.employeeModel, as: 'employee' }]
+      });
+
+      if (!payrollRecord) {
+        throw new Error(`Payroll record not found: ${recordId}`);
+      }
+
+      console.log(`✅ PAYROLL RECORD FOUND:`, {
+        employeeId: payrollRecord.employeeId,
+        month: payrollRecord.month,
+        year: payrollRecord.year,
+        currentNetSalary: payrollRecord.netSalary,
+        currentAllowances: payrollRecord.allowances,
+        currentDeductions: payrollRecord.deductions
+      });
+
+      // Parse existing allowances and deductions
+      const currentAllowances = payrollRecord.allowances as Record<string, number> || {};
+      const currentDeductions = payrollRecord.deductions as Record<string, number> || {};
+
+      const adjustmentAmount = Number(adjustmentData.amount);
+
+      if (adjustmentData.adjustmentType === 'ALLOWANCE') {
+        // Add to allowances
+        const allowanceKey = adjustmentData.adjustmentName.toLowerCase().replace(/\s+/g, '_');
+        currentAllowances[allowanceKey] = adjustmentAmount;
+        
+        console.log(`💰 ALLOWANCE ADJUSTMENT:`, {
+          originalName: adjustmentData.adjustmentName,
+          allowanceKey: allowanceKey,
+          amount: `₹${adjustmentAmount}`,
+          reason: adjustmentData.reason || 'No reason provided',
+          currentAllowancesBefore: JSON.stringify(payrollRecord.allowances),
+          currentAllowancesAfter: JSON.stringify(currentAllowances)
+        });
+
+      } else if (adjustmentData.adjustmentType === 'DEDUCTION') {
+        // Add to deductions
+        const deductionKey = adjustmentData.adjustmentName.toLowerCase().replace(/\s+/g, '_');
+        currentDeductions[deductionKey] = adjustmentAmount;
+        
+        console.log(`💸 DEDUCTION ADJUSTMENT:`, {
+          originalName: adjustmentData.adjustmentName,
+          deductionKey: deductionKey,
+          amount: `₹${adjustmentAmount}`,
+          reason: adjustmentData.reason || 'No reason provided',
+          currentDeductionsBefore: JSON.stringify(payrollRecord.deductions),
+          currentDeductionsAfter: JSON.stringify(currentDeductions)
+        });
+      }
+
+      // Recalculate totals from all components
+      const newTotalAllowances = Object.values(currentAllowances).reduce((sum: number, amount) => sum + Number(amount), 0);
+      const newTotalDeductions = Object.values(currentDeductions).reduce((sum: number, amount) => sum + Number(amount), 0);
+      
+      // Recalculate gross and net salary properly
+      const baseSalary = Number(payrollRecord.baseSalary || 0);
+      const newGrossSalary = baseSalary + newTotalAllowances;
+      const newNetSalary = newGrossSalary - newTotalDeductions;
+
+      console.log(`🧮 SALARY RECALCULATION:`, {
+        baseSalary: `₹${baseSalary}`,
+        totalAllowances: `₹${newTotalAllowances}`,
+        grossSalary: `₹${newGrossSalary}`,
+        totalDeductions: `₹${newTotalDeductions}`,
+        netSalary: `₹${newNetSalary}`,
+        calculation: `₹${baseSalary} + ₹${newTotalAllowances} - ₹${newTotalDeductions} = ₹${newNetSalary}`
+      });
+
+      // Update the payroll record with all recalculated values
+      console.log(`🔄 DATABASE UPDATE ATTEMPT:`, {
+        recordId,
+        allowancesToUpdate: JSON.stringify(currentAllowances),
+        deductionsToUpdate: JSON.stringify(currentDeductions),
+        newGrossSalary: Math.round(newGrossSalary * 100) / 100,
+        newTotalDeductions: Math.round(newTotalDeductions * 100) / 100,
+        newNetSalary: Math.round(newNetSalary * 100) / 100
+      });
+
+      // Force JSON field updates by setting them explicitly and marking as changed
+      payrollRecord.allowances = currentAllowances;
+      payrollRecord.deductions = currentDeductions;
+      payrollRecord.totalAllowances = Math.round(newTotalAllowances * 100) / 100;
+      payrollRecord.grossSalary = Math.round(newGrossSalary * 100) / 100;
+      payrollRecord.totalDeductions = Math.round(newTotalDeductions * 100) / 100;
+      payrollRecord.netSalary = Math.round(newNetSalary * 100) / 100;
+      
+      // Explicitly mark JSON fields as changed to force Sequelize to update them
+      payrollRecord.changed('allowances', true);
+      payrollRecord.changed('deductions', true);
+      
+      console.log(`🔍 BEFORE SAVE - Changed fields:`, payrollRecord.changed());
+      
+      // Save the record
+      await payrollRecord.save();
+      
+      console.log(`🔍 AFTER SAVE - Record state:`, {
+        allowances: payrollRecord.allowances,
+        deductions: payrollRecord.deductions,
+        grossSalary: payrollRecord.grossSalary,
+        netSalary: payrollRecord.netSalary
+      });
+
+      console.log(`✅ DATABASE UPDATE COMPLETED:`, {
+        recordId,
+        finalAllowances: JSON.stringify(payrollRecord.allowances),
+        finalDeductions: JSON.stringify(payrollRecord.deductions)
+      });
+
+      console.log(`✅ PAYROLL ADJUSTMENT COMPLETED:`, {
+        recordId,
+        adjustmentType: adjustmentData.adjustmentType,
+        adjustmentName: adjustmentData.adjustmentName,
+        adjustmentAmount: `₹${adjustmentAmount}`,
+        oldNetSalary: `₹${payrollRecord.netSalary}`,
+        newNetSalary: `₹${Math.round(newNetSalary * 100) / 100}`,
+        updatedAllowances: currentAllowances,
+        updatedDeductions: currentDeductions,
+        newTotalDeductions: `₹${newTotalDeductions}`
+      });
+
+      return {
+        success: true,
+        message: 'Payroll adjusted successfully',
+        recordId,
+        adjustmentType: adjustmentData.adjustmentType,
+        adjustmentName: adjustmentData.adjustmentName,
+        adjustmentAmount: adjustmentAmount,
+        oldNetSalary: Number(payrollRecord.netSalary),
+        newNetSalary: Math.round(newNetSalary * 100) / 100,
+        updatedRecord: {
+          allowances: currentAllowances,
+          deductions: currentDeductions,
+          grossSalary: Math.round(newGrossSalary * 100) / 100,
+          totalDeductions: Math.round(newTotalDeductions * 100) / 100,
+          netSalary: Math.round(newNetSalary * 100) / 100
+        }
+      };
+
+    } catch (error: any) {
+      console.error(`❌ PAYROLL ADJUSTMENT FAILED:`, {
+        recordId,
+        adjustmentData,
+        error: error.message
+      });
+      throw error;
+    }
+  }
+
+  // Get employees eligible for payroll calculation for specific month
+  async getEligibleEmployees(month: string, tenantId: string): Promise<any[]> {
+    console.log(`🔍 GETTING ELIGIBLE EMPLOYEES:`, {
+      month,
+      tenantId,
+      method: 'getEligibleEmployees'
+    });
+
+    try {
+      // Parse the month (format: YYYY-MM)
+      const [year, monthNum] = month.split('-');
+      const payrollDate = new Date(parseInt(year), parseInt(monthNum) - 1, 1); // First day of payroll month
+      
+      console.log(`📅 PAYROLL DATE FILTER:`, {
+        inputMonth: month,
+        payrollDate: payrollDate.toISOString(),
+        filterLogic: 'joiningDate <= payrollDate'
+      });
+
+      // Get employees who joined on or before the payroll month
+      const eligibleEmployees = await this.employeeModel.findAll({
+        where: {
+          tenantId,
+          status: 'active',
+          joiningDate: {
+            [Op.lte]: payrollDate // Joining date <= payroll month
+          }
+        },
+        attributes: [
+          'id',
+          'employeeId', 
+          'name',
+          'department',
+          'designation',
+          'salary',
+          'joiningDate'
+        ],
+        order: [['name', 'ASC']]
+      });
+
+      console.log(`✅ ELIGIBLE EMPLOYEES FOUND:`, {
+        totalCount: eligibleEmployees.length,
+        employees: eligibleEmployees.map(emp => ({
+          name: emp.name,
+          joiningDate: emp.joiningDate,
+          eligible: new Date(emp.joiningDate) <= payrollDate
+        }))
+      });
+
+      return eligibleEmployees;
+
+    } catch (error) {
+      console.error(`❌ ERROR GETTING ELIGIBLE EMPLOYEES:`, error);
+      throw new Error(`Failed to get eligible employees: ${error.message}`);
+    }
+  }
+
+  // Bulk approve payroll records
+  async bulkApprovePayroll(payrollRecordIds: string[], approvalNotes: string, approverId: string, tenantId: string): Promise<any> {
+    console.log(`🔍 BULK APPROVE PAYROLL:`, {
+      payrollRecordIds,
+      approvalNotes,
+      approverId,
+      tenantId,
+      recordCount: payrollRecordIds.length
+    });
+
+    try {
+      // 1. Validate that all records exist and are in CALCULATED status
+      const records = await this.payrollRecordModel.findAll({
+        where: {
+          id: payrollRecordIds,
+          tenantId,
+          status: PayrollStatus.CALCULATED // Only approve CALCULATED records
+        },
+        include: [
+          {
+            model: Employee,
+            as: 'employee',
+            attributes: ['name', 'employeeId']
+          }
+        ]
+      });
+
+      if (records.length === 0) {
+        throw new Error('No eligible records found for approval. Records must be in CALCULATED status.');
+      }
+
+      if (records.length !== payrollRecordIds.length) {
+        const foundIds = records.map(r => r.id);
+        const missingIds = payrollRecordIds.filter(id => !foundIds.includes(id));
+        console.log(`⚠️  WARNING - Some records not found or not eligible:`, {
+          requestedCount: payrollRecordIds.length,
+          foundCount: records.length,
+          missingIds
+        });
+      }
+
+      // 2. Update all eligible records to HR_APPROVED status
+      const approvalTime = new Date();
+      const updateResults = await Promise.all(
+        records.map(async (record) => {
+          try {
+            await record.update({
+              status: PayrollStatus.HR_APPROVED,
+              approvedBy: approverId,
+              approvedAt: approvalTime
+            });
+
+            console.log(`✅ APPROVED:`, {
+              recordId: record.id,
+              employeeName: record.employee?.name,
+              employeeId: record.employee?.employeeId,
+              previousStatus: PayrollStatus.CALCULATED,
+              newStatus: PayrollStatus.HR_APPROVED,
+              approvedBy: approverId,
+              approvedAt: approvalTime
+            });
+
+            return {
+              success: true,
+              recordId: record.id,
+              employeeName: record.employee?.name,
+              employeeId: record.employee?.employeeId
+            };
+          } catch (error) {
+            console.error(`❌ FAILED TO APPROVE RECORD ${record.id}:`, error);
+            return {
+              success: false,
+              recordId: record.id,
+              employeeName: record.employee?.name,
+              employeeId: record.employee?.employeeId,
+              error: error.message
+            };
+          }
+        })
+      );
+
+      // 3. Prepare response summary
+      const successful = updateResults.filter(r => r.success);
+      const failed = updateResults.filter(r => !r.success);
+
+      const result = {
+        message: `Bulk approval completed`,
+        summary: {
+          requested: payrollRecordIds.length,
+          eligible: records.length,
+          successful: successful.length,
+          failed: failed.length
+        },
+        approvalDetails: {
+          approvedBy: approverId,
+          approvedAt: approvalTime,
+          approvalNotes: approvalNotes || 'Bulk approved by HR'
+        },
+        results: {
+          successful: successful.map(r => ({
+            recordId: r.recordId,
+            employeeName: r.employeeName,
+            employeeId: r.employeeId,
+            status: 'APPROVED'
+          })),
+          failed: failed.map(r => ({
+            recordId: r.recordId,
+            employeeName: r.employeeName,
+            employeeId: r.employeeId,
+            error: r.error
+          }))
+        }
+      };
+
+      console.log(`✅ BULK APPROVAL COMPLETED:`, result.summary);
+      return result;
+
+    } catch (error) {
+      console.error(`❌ BULK APPROVAL FAILED:`, {
+        payrollRecordIds,
+        error: error.message
+      });
+      throw new Error(`Bulk approval failed: ${error.message}`);
+    }
+  }
+
+  // Get dashboard summary for HR overview
+  async getDashboardSummary(month: string, tenantId: string): Promise<any> {
+    console.log(`🔍 DASHBOARD SUMMARY:`, { month, tenantId });
+
+    try {
+      const records = await this.payrollRecordModel.findAll({
+        where: { month, tenantId },
+        include: [
+          {
+            model: Employee,
+            as: 'employee',
+            attributes: ['name', 'department', 'employeeId']
+          }
+        ]
+      });
+
+      console.log(`📊 Found ${records.length} payroll records for dashboard`);
+
+      const totalPayroll = records.reduce((sum, r) => sum + Number(r.netSalary || 0), 0);
+      const employeesPaid = records.filter(r => 
+        r.status === 'HR_APPROVED' || r.status === 'PROCESSED'
+      ).length;
+      const totalEmployees = records.length;
+      const avgSalary = totalEmployees > 0 ? totalPayroll / totalEmployees : 0;
+
+      const summary = {
+        totalPayroll: Math.round(totalPayroll),
+        employeesPaid,
+        totalEmployees,
+        avgSalary: Math.round(avgSalary),
+        pendingReimbursements: 1250, // Mock data as requested
+        pendingReimbursementCount: 5 // Mock data as requested
+      };
+
+      console.log(`✅ Dashboard summary:`, summary);
+      return summary;
+
+    } catch (error) {
+      console.error(`❌ ERROR GETTING DASHBOARD SUMMARY:`, error);
+      throw new Error(`Failed to get dashboard summary: ${error.message}`);
+    }
+  }
+
+  // Get department breakdown for salary distribution
+  async getDepartmentBreakdown(month: string, tenantId: string): Promise<any> {
+    console.log(`🔍 DEPARTMENT BREAKDOWN:`, { month, tenantId });
+
+    try {
+      const records = await this.payrollRecordModel.findAll({
+        where: { month, tenantId },
+        include: [
+          {
+            model: Employee,
+            as: 'employee',
+            attributes: ['department']
+          }
+        ]
+      });
+
+      console.log(`📊 Found ${records.length} records for department breakdown`);
+
+      // Group by department
+      const departmentTotals: { [key: string]: number } = {};
+      const departmentCounts: { [key: string]: number } = {};
+      let totalPayroll = 0;
+
+      records.forEach(record => {
+        const dept = record.employee?.department || 'Unknown';
+        const salary = Number(record.netSalary || 0);
+        
+        if (!departmentTotals[dept]) {
+          departmentTotals[dept] = 0;
+          departmentCounts[dept] = 0;
+        }
+        
+        departmentTotals[dept] += salary;
+        departmentCounts[dept] += 1;
+        totalPayroll += salary;
+      });
+
+      // Convert to array with percentages
+      const departments = Object.keys(departmentTotals).map(dept => ({
+        department: dept,
+        amount: Math.round(departmentTotals[dept]),
+        percentage: totalPayroll > 0 ? Math.round((departmentTotals[dept] / totalPayroll) * 100) : 0,
+        employeeCount: departmentCounts[dept]
+      }));
+
+      // Sort by amount descending
+      departments.sort((a, b) => b.amount - a.amount);
+
+      console.log(`✅ Department breakdown:`, departments);
+      return { departments };
+
+    } catch (error) {
+      console.error(`❌ ERROR GETTING DEPARTMENT BREAKDOWN:`, error);
+      throw new Error(`Failed to get department breakdown: ${error.message}`);
+    }
+  }
 }
