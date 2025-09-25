@@ -8,7 +8,7 @@ import { Attendance } from '../attendance/attendance.model';
 import { LeaveRequest } from '../leave/leave.model';
 import { PayrollCalculationService } from './services/payroll-calculation.service';
 import { HRPayrollCalculationService } from './services/hr-payroll-calculation.service';
-import { EmployeePayrollRecord, PayrollAdjustment, PayrollApproval } from './models/employee-payroll-record.model';
+import { EmployeePayrollRecord, PayrollAdjustment, PayrollApproval, EmployeeBankDetails } from './models/employee-payroll-record.model';
 import { PayrollSetupController } from './controllers/payroll-setup.controller';
 import { PayrollSetupService } from './services/payroll-setup.service';
 import { PayComponent } from './models/pay-components.model';
@@ -37,6 +37,7 @@ import { LeaveModule } from '../leave/leave.module';
       EmployeePayrollRecord,
       PayrollAdjustment,
       PayrollApproval,
+      EmployeeBankDetails,
     ]),
   ],
   controllers: [PayrollController, PayrollSetupController],

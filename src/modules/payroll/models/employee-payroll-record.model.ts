@@ -19,7 +19,10 @@ export enum PayrollStatus {
   DRAFT = 'DRAFT',
   CALCULATED = 'CALCULATED',
   HR_APPROVED = 'HR_APPROVED',
-  PROCESSED = 'PROCESSED',
+  FINANCE_APPROVED = 'FINANCE_APPROVED',
+  PAYMENT_INITIATED = 'PAYMENT_INITIATED',
+  PAID = 'PAID',
+  PROCESSED = 'PROCESSED', // Keep for backward compatibility
 }
 
 @Table({
@@ -141,6 +144,39 @@ export class EmployeePayrollRecord extends Model {
   @AllowNull(true)
   @Column({ type: DataType.DATE })
   declare approvedAt?: Date;
+
+  // Finance Approval Fields
+  @AllowNull(true)
+  @ForeignKey(() => User)
+  @Column({ type: DataType.UUID })
+  declare financeApprovedBy?: string;
+
+  @BelongsTo(() => User, { foreignKey: 'financeApprovedBy', as: 'financeApprover' })
+  declare financeApprover?: User;
+
+  @AllowNull(true)
+  @Column({ type: DataType.DATE })
+  declare financeApprovedAt?: Date;
+
+  @AllowNull(true)
+  @Column({ type: DataType.TEXT })
+  declare financeApprovalNotes?: string;
+
+  // Payment Tracking Fields
+  @AllowNull(true)
+  @Default('PENDING')
+  @Column({
+    type: DataType.ENUM('PENDING', 'INITIATED', 'PAID'),
+  })
+  declare paymentStatus?: 'PENDING' | 'INITIATED' | 'PAID';
+
+  @AllowNull(true)
+  @Column({ type: DataType.DATE })
+  declare paymentDate?: Date;
+
+  @AllowNull(true)
+  @Column({ type: DataType.STRING })
+  declare paymentReference?: string;
 }
 
 // PayrollAdjustment Model
@@ -247,4 +283,96 @@ export class PayrollApproval extends Model {
   @Default(DataType.NOW)
   @Column({ type: DataType.DATE })
   declare approvedAt: Date;
+}
+
+// EmployeeBankDetails Model - For Finance-approved payroll bank transfers
+@Table({
+  tableName: 'employee_bank_details',
+  timestamps: true,
+})
+export class EmployeeBankDetails extends Model {
+  @PrimaryKey
+  @Default(DataType.UUIDV4)
+  @Column({ type: DataType.UUID })
+  declare id: string;
+
+  // Tenant isolation
+  @AllowNull(false)
+  @ForeignKey(() => Company)
+  @Column({ type: DataType.UUID })
+  declare tenantId: string;
+
+  @BelongsTo(() => Company)
+  declare company?: Company;
+
+  // References to payroll and employee
+  @AllowNull(false)
+  @ForeignKey(() => EmployeePayrollRecord)
+  @Column({ type: DataType.UUID })
+  declare payrollRecordId: string;
+
+  @BelongsTo(() => EmployeePayrollRecord, { foreignKey: 'payrollRecordId', as: 'payrollRecord' })
+  declare payrollRecord?: EmployeePayrollRecord;
+
+  @AllowNull(false)
+  @ForeignKey(() => Employee)
+  @Column({ type: DataType.UUID })
+  declare employeeId: string;
+
+  @BelongsTo(() => Employee, { foreignKey: 'employeeId', as: 'employee' })
+  declare employee?: Employee;
+
+  // Bank Details (Dummy Data)
+  @AllowNull(false)
+  @Column({ type: DataType.STRING(100) })
+  declare bankName: string;
+
+  @AllowNull(false)
+  @Column({ type: DataType.STRING(20) })
+  declare accountNumber: string;
+
+  @AllowNull(false)
+  @Column({ type: DataType.STRING(100) })
+  declare accountHolderName: string;
+
+  @AllowNull(false)
+  @Column({ type: DataType.STRING(11) })
+  declare ifscCode: string;
+
+  @AllowNull(true)
+  @Column({ type: DataType.STRING(100) })
+  declare branchName?: string;
+
+  @AllowNull(true)
+  @Default('SALARY')
+  @Column({ type: DataType.STRING(20) })
+  declare accountType?: string;
+
+  // Transfer Status and Tracking
+  @AllowNull(false)
+  @Default('PENDING')
+  @Column({
+    type: DataType.ENUM('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED'),
+  })
+  declare transferStatus: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+
+  @AllowNull(true)
+  @Column({ type: DataType.DECIMAL(10, 2) })
+  declare transferAmount?: number;
+
+  @AllowNull(true)
+  @Column({ type: DataType.STRING(50) })
+  declare transactionId?: string;
+
+  @AllowNull(true)
+  @Column({ type: DataType.DATE })
+  declare transferredAt?: Date;
+
+  @AllowNull(true)
+  @ForeignKey(() => User)
+  @Column({ type: DataType.UUID })
+  declare transferredBy?: string;
+
+  @BelongsTo(() => User, { foreignKey: 'transferredBy', as: 'transferrer' })
+  declare transferrer?: User;
 }

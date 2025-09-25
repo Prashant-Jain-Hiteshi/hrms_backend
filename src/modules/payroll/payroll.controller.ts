@@ -389,4 +389,160 @@ export class PayrollController {
   ) {
     return await this.hrPayrollService.getDepartmentBreakdown(month, tenantId);
   }
+
+  // Finance Approval Endpoints
+  @Get('finance/pending-approvals/:month')
+  @Roles(UserRole.FINANCE, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Get HR-approved payroll records pending Finance approval' })
+  @ApiResponse({
+    status: 200,
+    description: 'Pending Finance approvals retrieved successfully.',
+  })
+  async getPendingFinanceApprovals(
+    @Param('month') month: string,
+    @TenantId() tenantId: string,
+  ) {
+    return await this.hrPayrollService.getPendingFinanceApprovals(month, tenantId);
+  }
+
+  @Put('finance/approve/:recordId')
+  @Roles(UserRole.FINANCE, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Finance approve individual payroll record' })
+  @ApiResponse({
+    status: 200,
+    description: 'Payroll record approved by Finance successfully.',
+  })
+  async financeApprovePayroll(
+    @Param('recordId') recordId: string,
+    @Body() body: { approvalNotes?: string },
+    @Req() req: any,
+    @TenantId() tenantId: string,
+  ) {
+    console.log('🔍 DEBUG - Finance Approve Payroll Request:', {
+      recordId,
+      approvalNotes: body.approvalNotes,
+      userId: req.user?.id
+    });
+    
+    return await this.hrPayrollService.financeApprovePayroll(
+      recordId,
+      req.user?.id, // approverId
+      body.approvalNotes || 'Approved by Finance',
+      tenantId
+    );
+  }
+
+  @Post('finance/approve-bulk')
+  @Roles(UserRole.FINANCE, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Finance bulk approve payroll records' })
+  @ApiResponse({
+    status: 200,
+    description: 'Payroll records bulk approved by Finance successfully.',
+  })
+  async financeBulkApprovePayroll(
+    @Body() body: { recordIds: string[]; approvalNotes?: string },
+    @Req() req: any,
+    @TenantId() tenantId: string,
+  ) {
+    console.log('🔍 DEBUG - Finance Bulk Approve Payroll Request:', {
+      recordIds: body.recordIds,
+      approvalNotes: body.approvalNotes,
+      userId: req.user?.id
+    });
+    
+    return await this.hrPayrollService.financeBulkApprovePayroll(
+      body.recordIds,
+      req.user?.id, // approverId
+      body.approvalNotes || 'Bulk approved by Finance',
+      tenantId
+    );
+  }
+
+  // Bank Transfer Management Endpoints - NEW
+
+  @Get('finance/bank-transfers/:month')
+  @Roles(UserRole.FINANCE, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Get bank transfer data for Finance-approved payroll' })
+  @ApiResponse({
+    status: 200,
+    description: 'Bank transfer data retrieved successfully.',
+  })
+  async getBankTransferData(
+    @Param('month') month: string,
+    @TenantId() tenantId: string,
+  ) {
+    console.log('🔍 DEBUG - Get Bank Transfer Data Request:', { month, tenantId });
+    return await this.hrPayrollService.getBankTransferData(month, tenantId);
+  }
+
+  @Post('finance/initiate-bank-transfer')
+  @Roles(UserRole.FINANCE, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Initiate bank transfers for selected employees' })
+  @ApiResponse({
+    status: 200,
+    description: 'Bank transfers initiated successfully.',
+  })
+  async initiateBankTransfer(
+    @Body() body: { bankDetailIds: string[] },
+    @Req() req: any,
+    @TenantId() tenantId: string,
+  ) {
+    console.log('🔍 DEBUG - Initiate Bank Transfer Request:', {
+      bankDetailIds: body.bankDetailIds,
+      userId: req.user?.id,
+      tenantId
+    });
+    
+    return await this.hrPayrollService.initiateBankTransfer(
+      body.bankDetailIds,
+      req.user?.id,
+      tenantId
+    );
+  }
+
+  @Get('finance/bank-transfer-summary/:month')
+  @Roles(UserRole.FINANCE, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Get bank transfer summary statistics' })
+  @ApiResponse({
+    status: 200,
+    description: 'Bank transfer summary retrieved successfully.',
+  })
+  async getBankTransferSummary(
+    @Param('month') month: string,
+    @TenantId() tenantId: string,
+  ) {
+    console.log('🔍 DEBUG - Get Bank Transfer Summary Request:', { month, tenantId });
+    return await this.hrPayrollService.getBankTransferSummary(month, tenantId);
+  }
+
+  @Get('finance/bank-transfer-receipt/:bankDetailId')
+  @Roles(UserRole.FINANCE, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Get bank transfer receipt details' })
+  @ApiResponse({
+    status: 200,
+    description: 'Bank transfer receipt details retrieved successfully.',
+  })
+  async getBankTransferReceipt(
+    @Param('bankDetailId') bankDetailId: string,
+    @TenantId() tenantId: string,
+  ) {
+    console.log('🔍 DEBUG - Get Bank Transfer Receipt Request:', { bankDetailId, tenantId });
+    return await this.hrPayrollService.getBankTransferReceipt(bankDetailId, tenantId);
+  }
+
+  @Get('finance/bank-transfer-report')
+  @Roles(UserRole.FINANCE, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Generate bank transfer report' })
+  @ApiResponse({
+    status: 200,
+    description: 'Bank transfer report generated successfully.',
+  })
+  async generateBankTransferReport(
+    @Query('month') month: string,
+    @Query('status') status: string = 'ALL',
+    @TenantId() tenantId: string,
+  ) {
+    console.log('🔍 DEBUG - Generate Bank Transfer Report Request:', { month, status, tenantId });
+    return await this.hrPayrollService.generateBankTransferReport(month, status, tenantId);
+  }
 }
