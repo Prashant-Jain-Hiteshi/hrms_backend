@@ -38,8 +38,24 @@ export class EmployeesController {
     @TenantId() tenantId: string,
     @CompanyCode() companyCode: string
   ) {
-    this.logger.log(`Creating employee for tenant: ${tenantId} (${companyCode})`);
-    return this.employeesService.create(dto, tenantId);
+    try {
+      console.log('🚀 === CONTROLLER: Employee creation request received ===');
+      console.log('🏢 Tenant:', tenantId);
+      console.log('🏢 Company Code:', companyCode);
+      console.log('📝 Request DTO:', JSON.stringify(dto, null, 2));
+      
+      this.logger.log(`Creating employee for tenant: ${tenantId} (${companyCode})`);
+      
+      const result = this.employeesService.create(dto, tenantId);
+      console.log('✅ Controller: Service call initiated successfully');
+      return result;
+      
+    } catch (error) {
+      console.log('💥 Controller error:', error.message);
+      console.log('📊 Controller error stack:', error.stack);
+      this.logger.error('💥 Controller error:', error.message);
+      throw error;
+    }
   }
 
   @Get()

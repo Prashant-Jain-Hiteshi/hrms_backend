@@ -3,6 +3,7 @@ import {
   Injectable,
   InternalServerErrorException,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import { User } from './users.model';
@@ -12,10 +13,14 @@ import * as bcrypt from 'bcryptjs';
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     @InjectModel(User)
     private readonly userModel: typeof User,
-  ) {}
+  ) {
+    this.logger.log('🔧 UsersService initialized');
+  }
 
   async create(dto: CreateUserDto): Promise<User> {
     // Check for duplicate email
@@ -60,7 +65,28 @@ export class UsersService {
   }
 
   async findByEmail(email: string): Promise<User | null> {
-    return this.userModel.findOne({ where: { email } });
+    try {
+      this.logger.log(`🔍 Finding user by email: ${email}`);
+      
+      if (!email) {
+        this.logger.error('❌ Email is null or undefined');
+        return null;
+      }
+
+      const user = await this.userModel.findOne({ where: { email } });
+      
+      if (user) {
+        this.logger.log(`✅ User found: ${email} (ID: ${user.id})`);
+      } else {
+        this.logger.log(`❌ User not found: ${email}`);
+      }
+      
+      return user;
+    } catch (error) {
+      this.logger.error(`💥 Database error finding user ${email}:`, error.message);
+      this.logger.error(`📊 Error stack:`, error.stack);
+      throw error;
+    }
   }
 
   async update(id: string, dto: UpdateUserDto): Promise<User> {

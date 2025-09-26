@@ -63,6 +63,16 @@ export class User extends Model {
   @Column(DataType.DATE)
   declare lastLoginAt?: Date | null;
 
+  // OTP fields for forgot password functionality
+  @AllowNull(true)
+  @Column(DataType.STRING)
+  declare otpCode?: string;
+
+  @AllowNull(true)
+  @Column(DataType.DATE)
+  declare otpExpiresAt?: Date;
+  
+
   // Tenant relationship
   @AllowNull(true)
   @ForeignKey(() => Company)

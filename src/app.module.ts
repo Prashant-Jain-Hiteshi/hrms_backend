@@ -11,6 +11,7 @@ import { LeaveModule } from './modules/leave/leave.module';
 import { PayrollModule } from './modules/payroll/payroll.module';
 import { CompaniesModule } from './modules/companies/companies.module';
 import { SuperAdminModule } from './modules/super-admin/super-admin.module';
+import { EmailModule } from './modules/email/email.module';
 
 @Module({
   imports: [
@@ -47,7 +48,7 @@ import { SuperAdminModule } from './modules/super-admin/super-admin.module';
           password: config.get('DB_PASS', 'postgres'),
           autoLoadModels: true,
           synchronize: dbSync,
-          // sync: { alter: true }, // Disabled - causes foreign key conflicts with existing data
+          sync: { alter: true }, // Disabled - causes foreign key conflicts with existing data
           logging,
           dialectOptions,
         
@@ -62,6 +63,7 @@ import { SuperAdminModule } from './modules/super-admin/super-admin.module';
     PayrollModule,
     CompaniesModule,
     SuperAdminModule,
+    EmailModule,
   ],
   controllers: [AppController],
   providers: [AppService],

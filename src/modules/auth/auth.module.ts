@@ -1,22 +1,28 @@
 import { Module } from '@nestjs/common';
-import { PassportModule } from '@nestjs/passport';
 import { JwtModule } from '@nestjs/jwt';
+import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { SequelizeModule } from '@nestjs/sequelize';
+
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
-import { UsersModule } from '../users/users.module';
 import { LocalStrategy } from './strategies/local.strategy';
 import { JwtStrategy } from './strategies/jwt.strategy';
-import { SequelizeModule } from '@nestjs/sequelize';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { RolesGuard } from './guards/roles.guard';
+import { UsersModule } from '../users/users.module';
+import { EmailModule } from '../email/email.module';
 import { Employee } from '../employees/employees.model';
 import { Company } from '../companies/companies.model';
+import { User } from '../users/users.model';
 
 @Module({
   imports: [
     UsersModule,
+    EmailModule,
     PassportModule,
     ConfigModule,
-    SequelizeModule.forFeature([Employee, Company]),
+    SequelizeModule.forFeature([Employee, Company, User]),
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({

@@ -30,6 +30,7 @@ export class SuperAdminGuard implements CanActivate {
   }
 
   private extractTokenFromHeader(request: any): string | undefined {
+    console.log(request.headers.authorization);
     const [type, token] = request.headers.authorization?.split(' ') ?? [];
     return type === 'Bearer' ? token : undefined;
   }

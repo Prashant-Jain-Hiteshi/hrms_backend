@@ -10,6 +10,7 @@ import { CreateSuperAdminDto } from './dto/create-super-admin.dto';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import { CreateCompanyAdminDto } from './dto/create-company-admin.dto';
 import { Role } from '../../common/enums/role.enum';
+import { AuthService } from '../auth/auth.service';
 
 @Injectable()
 export class SuperAdminService {
@@ -25,6 +26,7 @@ export class SuperAdminService {
     @InjectModel(Employee)
     private employeeModel: typeof Employee,
     private jwtService: JwtService,
+    private authService: AuthService,
   ) {}
 
   // Create Super Admin (Registration)
@@ -239,6 +241,27 @@ export class SuperAdminService {
         tenantId: createCompanyAdminDto.companyId,
       });
       this.logger.log('Employee record created successfully');
+
+      // Send welcome email to the new admin
+      try {
+        this.logger.log('📧 Sending welcome email to new admin:', createCompanyAdminDto.email);
+        const userName = `${createCompanyAdminDto.firstName} ${createCompanyAdminDto.lastName}`;
+        const emailSent = await this.authService.sendWelcomeEmail(
+          userName,
+          createCompanyAdminDto.email,
+          createCompanyAdminDto.password, // Send the original password
+          'Admin'
+        );
+        
+        if (emailSent) {
+          this.logger.log('✅ Welcome email sent successfully to:', createCompanyAdminDto.email);
+        } else {
+          this.logger.warn('⚠️ Failed to send welcome email to:', createCompanyAdminDto.email);
+        }
+      } catch (emailError) {
+        // Don't fail the entire operation if email fails
+        this.logger.error('💥 Error sending welcome email:', emailError.message);
+      }
 
       this.logger.log('Company admin created successfully');
       return { user, employee };

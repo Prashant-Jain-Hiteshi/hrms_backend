@@ -8,10 +8,12 @@ import { SuperAdmin } from './super-admin.model';
 import { Company } from '../companies/companies.model';
 import { User } from '../users/users.model';
 import { Employee } from '../employees/employees.model';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
     SequelizeModule.forFeature([SuperAdmin, Company, User, Employee]),
+    AuthModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
