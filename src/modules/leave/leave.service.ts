@@ -716,12 +716,12 @@ export class LeaveService {
     if (leaveTypes.length === 0) {
       console.warn('No active leave credit configs found, using fallback hardcoded values');
       leaveTypes.push(
-        { name: 'Annual Leave', numberOfLeaves: 20 },
-        { name: 'Sick Leave', numberOfLeaves: 10 },
-        { name: 'Casual Leave', numberOfLeaves: 5 },
-        { name: 'Maternity Leave', numberOfLeaves: 90 },
-        { name: 'Paternity Leave', numberOfLeaves: 15 },
-        { name: 'Emergency Leave', numberOfLeaves: 3 },
+        { name: 'Annual Leave', numberOfLeaves: 0 },
+        { name: 'Sick Leave', numberOfLeaves: 0 },
+        { name: 'Casual Leave', numberOfLeaves: 0 },
+        { name: 'Maternity Leave', numberOfLeaves: 0 },
+        { name: 'Paternity Leave', numberOfLeaves: 0 },
+        { name: 'Emergency Leave', numberOfLeaves: 0 },
       );
     }
 
