@@ -792,6 +792,7 @@ export class HRPayrollCalculationService {
         where: {
           tenantId,
           status: 'active',
+          department:"Engineering",
           joiningDate: {
             [Op.lte]: payrollDate // Joining date <= payroll month
           }
