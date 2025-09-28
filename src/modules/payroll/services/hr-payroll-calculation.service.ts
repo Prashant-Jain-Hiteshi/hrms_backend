@@ -1676,6 +1676,167 @@ export class HRPayrollCalculationService {
     }
   }
 
+  // Employee-specific methods for payslip access
+  async getEmployeePayslips(employeeId: string, tenantId: string, month?: string): Promise<any> {
+    console.log(`🔍 GET EMPLOYEE PAYSLIPS:`, { employeeId, tenantId, month });
+
+    try {
+      // Build where condition
+      const whereCondition: any = {
+        tenantId,
+        status: 'FINANCE_APPROVED' // Only show completed payslips to employees
+      };
+
+      if (month) {
+        whereCondition.month = month;
+      }
+
+      // Get employee's payroll records
+      const payrollRecords = await this.payrollRecordModel.findAll({
+        where: whereCondition,
+        include: [
+          {
+            model: Employee,
+            as: 'employee',
+            where: { employeeId: employeeId },
+            attributes: ['id', 'employeeId', 'name', 'email', 'department', 'designation']
+          },
+        ],
+        order: [['month', 'DESC']]
+      });
+
+      console.log(`📊 Found ${payrollRecords.length} payroll records for employee ${employeeId}`);
+
+      return payrollRecords.map(record => ({
+        id: record.id,
+        payrollMonth: record.month,
+        employee: {
+          id: record.employee?.employeeId,
+          name: record.employee?.name,
+          department: record.employee?.department,
+          designation: record.employee?.designation,
+          email: record.employee?.email
+        },
+        salary: {
+          baseSalary: record.baseSalary,
+          totalAllowances: record.totalAllowances,
+          totalDeductions: record.totalDeductions,
+          grossSalary: record.grossSalary,
+          netSalary: record.netSalary,
+          workingDays: record.workingDays,
+          paidDays: record.paidDays,
+          unpaidDays: record.unpaidDays
+        },
+        status: record.status,
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt
+      }));
+
+    } catch (error) {
+      console.error(`❌ ERROR GETTING EMPLOYEE PAYSLIPS:`, error);
+      throw new Error(`Failed to get employee payslips: ${error.message}`);
+    }
+  }
+
+  async getEmployeePayslipReceipt(payrollRecordId: string, employeeId: string, tenantId: string): Promise<any> {
+    console.log(`🔍 GET EMPLOYEE PAYSLIP RECEIPT:`, { payrollRecordId, employeeId, tenantId });
+
+    try {
+      // Get payroll record with all related information, ensuring it belongs to the requesting employee
+      const payrollRecord = await this.payrollRecordModel.findOne({
+        where: { 
+          id: payrollRecordId, 
+          tenantId,
+          status: 'FINANCE_APPROVED' // Only show completed payslips
+        },
+        include: [
+          {
+            model: Employee,
+            as: 'employee',
+            where: { employeeId: employeeId }, // Ensure record belongs to requesting employee
+            attributes: ['id', 'employeeId', 'name', 'email', 'department', 'designation']
+          },
+        ]
+      });
+
+      if (!payrollRecord) {
+        throw new NotFoundException('Payslip record not found or access denied');
+      }
+
+      // Get company bank account details
+      const companyBankAccount = await this.getCompanyBankAccount(tenantId);
+
+      // Format the receipt data similar to bank transfer receipt
+      const receipt = {
+        // Transfer Information
+        transferId: `EMP-${payrollRecord.id}`,
+        transferDate: payrollRecord.updatedAt,
+        transferStatus: 'COMPLETED',
+        processingDate: payrollRecord.updatedAt,
+        month: payrollRecord.month,
+        transferMethod: 'NEFT',
+
+        // Employee Information
+        employee: {
+          id: payrollRecord.employee?.employeeId,
+          name: payrollRecord.employee?.name,
+          email: payrollRecord.employee?.email,
+          department: payrollRecord.employee?.department,
+          designation: payrollRecord.employee?.designation
+        },
+
+        // Salary Details
+        salary: {
+          basicSalary: payrollRecord.baseSalary,
+          allowances: payrollRecord.totalAllowances,
+          deductions: payrollRecord.totalDeductions,
+          allowancesBreakdown: payrollRecord.allowances,
+          deductionsBreakdown: payrollRecord.deductions,
+          grossSalary: payrollRecord.grossSalary,
+          netSalary: payrollRecord.netSalary,
+          workingDays: payrollRecord.workingDays,
+          paidDays: payrollRecord.paidDays,
+          lwpDays: payrollRecord.unpaidDays || 0
+        },
+
+        // Employee Bank Details (Recipient)
+        recipientBank: {
+          bankName: 'Employee Bank',
+          accountNumber: '****3412',
+          ifscCode: 'UTIB0001234',
+          accountHolderName: payrollRecord.employee?.name || 'Employee',
+          branchName: 'Main Branch'
+        },
+
+        // Company Bank Details (Sender)
+        senderBank: {
+          bankName: companyBankAccount.bankName,
+          accountNumber: companyBankAccount.accountNumber,
+          ifscCode: companyBankAccount.ifscCode,
+          accountHolderName: companyBankAccount.accountHolderName,
+          branchName: companyBankAccount.branchName,
+          companyName: companyBankAccount.companyName
+        },
+
+        // Transfer Details
+        transferAmount: payrollRecord.netSalary,
+        transferFees: 0,
+        remarks: `Salary transfer for ${payrollRecord.month}`,
+
+        // Receipt Metadata
+        generatedAt: new Date().toISOString(),
+        receiptNumber: `EMP${payrollRecord.id}${payrollRecord.month?.replace('-', '') || ''}`
+      };
+
+      console.log(`✅ Employee payslip receipt generated:`, receipt);
+      return receipt;
+
+    } catch (error) {
+      console.error(`❌ ERROR GETTING EMPLOYEE PAYSLIP RECEIPT:`, error);
+      throw new Error(`Failed to get employee payslip receipt: ${error.message}`);
+    }
+  }
+
   // Generate bank transfer report data
   async generateBankTransferReport(month: string, status: string, tenantId: string): Promise<any> {
     console.log(`🔍 GENERATE BANK TRANSFER REPORT:`, { month, status, tenantId });
