@@ -19,6 +19,7 @@ export class AppController {
   async health() {
     try {
       await this.sequelize.authenticate();
+      console.log('Database connection established successfully');
       return { status: 'ok', db: 'up' };
     } catch (error) {
       return { status: 'degraded', db: 'down', error: String(error) };

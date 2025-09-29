@@ -163,8 +163,9 @@ export class CompensatoryLeaveController {
     @Param('id', ParseIntPipe) id: number,
     @Body() updateDto: UpdateCompensatoryLeaveDto,
     @Request() req: any,
+    @TenantId() tenantId: string
   ) {
-    return this.compensatoryLeaveService.update(id, updateDto, req.user.id);
+    return this.compensatoryLeaveService.update(id, updateDto, req.user.id, tenantId);
   }
 
   @Delete(':id')
@@ -173,8 +174,8 @@ export class CompensatoryLeaveController {
   @ApiResponse({ status: HttpStatus.NO_CONTENT, description: 'Record deleted successfully' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Record not found' })
   @ApiResponse({ status: HttpStatus.FORBIDDEN, description: 'Access denied' })
-  async remove(@Param('id', ParseIntPipe) id: number) {
-    await this.compensatoryLeaveService.remove(id);
+  async remove(@Param('id', ParseIntPipe) id: number, @TenantId() tenantId: string) {
+    await this.compensatoryLeaveService.remove(id, tenantId);
   }
 
   @Post('expire-old')

@@ -545,4 +545,39 @@ export class PayrollController {
     console.log('🔍 DEBUG - Generate Bank Transfer Report Request:', { month, status, tenantId });
     return await this.hrPayrollService.generateBankTransferReport(month, status, tenantId);
   }
+
+  // Employee-specific endpoints for payslip access
+  @Get('employee/my-payslips')
+  @Roles(UserRole.EMPLOYEE, UserRole.HR, UserRole.ADMIN, UserRole.FINANCE)
+  @ApiOperation({ summary: 'Get current employee\'s payslips' })
+  @ApiResponse({
+    status: 200,
+    description: 'Employee payslips retrieved successfully.',
+  })
+  async getMyPayslips(
+    @Req() req: any,
+    @TenantId() tenantId: string,
+    @Query('month') month?: string,
+  ) {
+    const employeeId = req.user?.employeeId || req.user?.id;
+    console.log('🔍 DEBUG - Get My Payslips Request:', { employeeId, month, tenantId });
+    return await this.hrPayrollService.getEmployeePayslips(employeeId, tenantId, month);
+  }
+
+  @Get('employee/payslip-receipt/:payrollRecordId')
+  @Roles(UserRole.EMPLOYEE, UserRole.HR, UserRole.ADMIN, UserRole.FINANCE)
+  @ApiOperation({ summary: 'Get payslip receipt details for current employee' })
+  @ApiResponse({
+    status: 200,
+    description: 'Payslip receipt details retrieved successfully.',
+  })
+  async getMyPayslipReceipt(
+    @Param('payrollRecordId') payrollRecordId: string,
+    @Req() req: any,
+    @TenantId() tenantId: string,
+  ) {
+    const employeeId = req.user?.employeeId || req.user?.id;
+    console.log('🔍 DEBUG - Get My Payslip Receipt Request:', { payrollRecordId, employeeId, tenantId });
+    return await this.hrPayrollService.getEmployeePayslipReceipt(payrollRecordId, employeeId, tenantId);
+  }
 }

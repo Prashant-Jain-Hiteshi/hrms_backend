@@ -958,13 +958,24 @@ export class LeaveService {
 
   // Tenant-aware update leave credit config
   async updateLeaveCreditConfig(leaveType: string, updateData: any, tenantId: string) {
-    const key = String(leaveType).toLowerCase();
-    const record = await this.leaveCreditConfigModel.findOne({ 
-      where: { 
-        leaveType: key,
-        tenantId: tenantId 
-      } 
+    const incoming = String(leaveType);
+
+    // 1) Try exact match within tenant (records are stored with original casing)
+    let record = await this.leaveCreditConfigModel.findOne({
+      where: { leaveType: incoming, tenantId }
     });
+
+    // 2) Fallback: case-insensitive match (Postgres iLike) within tenant
+    if (!record) {
+      try {
+        record = await this.leaveCreditConfigModel.findOne({
+          where: { leaveType: { [Op.iLike]: incoming }, tenantId }
+        });
+      } catch {
+        // If dialect doesn't support iLike, keep record as null and fall through
+      }
+    }
+
     if (!record) {
       throw new NotFoundException('Configuration not found for this company');
     }
@@ -981,19 +992,13 @@ export class LeaveService {
 
     await record.update(update as any);
 
-    const saved = await this.leaveCreditConfigModel.findOne({
-      where: { leaveType: key },
-      attributes: ['leaveType', 'monthlyCredit', 'isActive', 'updatedAt'],
-      raw: true,
-    });
-    if (!saved) {
-      throw new NotFoundException('Failed to fetch updated configuration');
-    }
+    // Reload and return normalized response
+    const saved = await record.reload();
     return {
-      leaveType: saved.leaveType,
-      monthlyCredit: saved.monthlyCredit != null ? Number(saved.monthlyCredit) : 0,
-      isActive: !!saved.isActive,
-      updatedAt: saved.updatedAt as unknown as Date,
+      leaveType: (saved as any).leaveType,
+      monthlyCredit: (saved as any).monthlyCredit != null ? Number((saved as any).monthlyCredit) : 0,
+      isActive: !!(saved as any).isActive,
+      updatedAt: (saved as any).updatedAt as unknown as Date,
     };
   }
 

@@ -208,8 +208,8 @@ export class CompensatoryLeaveService {
     });
   }
 
-  async update(id: number, updateDto: UpdateCompensatoryLeaveDto, updatedByUserId: number): Promise<CompensatoryLeave> {
-    const compensatoryLeave = await this.findOne(id);
+  async update(id: number, updateDto: UpdateCompensatoryLeaveDto, updatedByUserId: number, tenantId?: string): Promise<CompensatoryLeave> {
+    const compensatoryLeave = await this.findOne(id, tenantId);
 
     // Validate expiry date if provided
     if (updateDto.expiryDate) {
@@ -221,11 +221,11 @@ export class CompensatoryLeaveService {
     }
 
     await compensatoryLeave.update(updateDto);
-    return this.findOne(id);
+    return this.findOne(id, tenantId);
   }
 
-  async remove(id: number): Promise<void> {
-    const compensatoryLeave = await this.findOne(id);
+  async remove(id: number, tenantId?: string): Promise<void> {
+    const compensatoryLeave = await this.findOne(id, tenantId);
     await compensatoryLeave.destroy();
   }
 
