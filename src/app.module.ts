@@ -12,6 +12,7 @@ import { PayrollModule } from './modules/payroll/payroll.module';
 import { CompaniesModule } from './modules/companies/companies.module';
 import { SuperAdminModule } from './modules/super-admin/super-admin.module';
 import { EmailModule } from './modules/email/email.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -64,6 +65,7 @@ import { EmailModule } from './modules/email/email.module';
     CompaniesModule,
     SuperAdminModule,
     EmailModule,
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -23,6 +23,7 @@ import { CompensatoryLeaveService } from './compensatory-leave.service';
 import { EmployeeMonthlyLeaveRecord } from './models/employee-monthly-leave-record.model';
 import { User } from '../users/users.model';
 import { Company } from '../companies/companies.model';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { Company } from '../companies/companies.model';
       User,
       Company,
     ]),
+    NotificationsModule,
   ],
   controllers: [LeaveController, LeaveTypeController, CalendarController, CompensatoryLeaveController],
   providers: [LeaveService, LeaveTypeService, CalendarService, CompensatoryLeaveService],

@@ -20,6 +20,9 @@ import { LeaveStatus } from './leave.types';
 import { LeaveCredit, LeaveCreditConfig } from './leave-credit.model';
 import { EmployeeMonthlyLeaveRecord } from './models/employee-monthly-leave-record.model';
 import { CompensatoryLeaveService } from './compensatory-leave.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationsGateway } from '../notifications/notifications.gateway';
+import { NotificationType } from '../notifications/dto/create-notification.dto';
 
 @Injectable()
 export class LeaveService {
@@ -42,6 +45,8 @@ export class LeaveService {
     @InjectModel(EmployeeMonthlyLeaveRecord)
     private employeeMonthlyLeaveRecordModel: typeof EmployeeMonthlyLeaveRecord,
     private compensatoryLeaveService: CompensatoryLeaveService,
+    private notificationsService: NotificationsService,
+    private notificationsGateway: NotificationsGateway,
   ) {}
 
   async createLeaveRequest(employeeId: string, createLeaveDto: CreateLeaveDto) {
@@ -150,6 +155,68 @@ export class LeaveService {
       this.logger.log(
         `Leave request created successfully id=${leaveRequest.id}`,
       );
+
+      // Send notification to employee (leave request submitted)
+      try {
+        // Calculate days between start and end date
+        const startDate = new Date(leaveData.startDate);
+        const endDate = new Date(leaveData.endDate);
+        const timeDiff = endDate.getTime() - startDate.getTime();
+        const daysDiff = Math.ceil(timeDiff / (1000 * 3600 * 24)) + 1;
+
+        const employeeUser = await this.employeeModel.findOne({
+          where: { id: requestingEmployeeUuid },
+          include: [{ model: User, attributes: ['id'] }],
+        });
+
+        if (employeeUser && employeeUser.user) {
+          await this.notificationsService.createLeaveNotification(
+            employeeUser.user.id,
+            tenantId || '',
+            employeeId || 'Unknown',
+            NotificationType.LEAVE_PENDING,
+            {
+              leaveType: leaveData.leaveType,
+              startDate: leaveData.startDate,
+              endDate: leaveData.endDate,
+              days: daysDiff,
+            },
+            leaveRequest.id
+          );
+
+          // Send real-time notification
+          await this.notificationsGateway.sendToUser(
+            employeeUser.user.id,
+            {
+              type: 'leave_pending',
+              title: 'Leave Request Submitted',
+              message: `Your ${leaveData.leaveType} leave request has been submitted and is pending approval.`,
+              category: 'Leave',
+            }
+          );
+        }
+
+        // Get employee name for notifications
+        const requestingEmployee = await this.employeeModel.findOne({
+          where: { id: requestingEmployeeUuid },
+          attributes: ['name']
+        });
+        const employeeName = requestingEmployee?.name || employeeId || 'Employee';
+
+        // Send notifications to TO (approvers) and CC employees only
+        await this.sendNotificationsToApproversAndCC(
+          leaveRequest.id,
+          employeeName,
+          leaveData.leaveType,
+          daysDiff,
+          tenantId || ''
+        );
+
+      } catch (notificationError) {
+        this.logger.warn('Failed to send leave request notifications:', notificationError);
+        // Don't fail the leave request creation if notification fails
+      }
+
       return this.getLeaveRequestById(leaveRequest.id);
     } catch (err: unknown) {
       const e = err as Error;
@@ -569,6 +636,65 @@ export class LeaveService {
       changedAt: new Date(),
       comments: updateStatusDto.comments || `Leave ${updateStatusDto.status}`,
     });
+
+    // Send notification to employee about leave status update
+    try {
+      const employeeUser = await this.employeeModel.findOne({
+        where: { id: leaveRequest.employeeId },
+        include: [{ model: User, attributes: ['id'] }],
+        attributes: ['employeeId', 'tenantId'],
+      });
+
+      const approverUser = await this.employeeModel.findOne({
+        where: { id: approverUuid },
+        attributes: ['employeeId'],
+      });
+
+      if (employeeUser && employeeUser.user) {
+        // Calculate days for notification
+        const startDate = new Date(leaveRequest.startDate);
+        const endDate = new Date(leaveRequest.endDate);
+        const timeDiff = endDate.getTime() - startDate.getTime();
+        const daysDiff = Math.ceil(timeDiff / (1000 * 3600 * 24)) + 1;
+
+        const notificationType = updateStatusDto.status === 'approved' 
+          ? NotificationType.LEAVE_APPROVED 
+          : NotificationType.LEAVE_REJECTED;
+
+        await this.notificationsService.createLeaveNotification(
+          employeeUser.user.id,
+          employeeUser.tenantId || '',
+          employeeUser.employeeId || 'Unknown',
+          notificationType,
+          {
+            leaveType: leaveRequest.leaveType,
+            startDate: leaveRequest.startDate.toString(),
+            endDate: leaveRequest.endDate.toString(),
+            days: daysDiff,
+            approvedBy: approverUser?.employeeId,
+            rejectionReason: updateStatusDto.status === 'rejected' ? updateStatusDto.comments : undefined,
+          },
+          leaveRequest.id
+        );
+
+        // Send real-time notification
+        await this.notificationsGateway.sendLeaveApprovalNotification(
+          employeeUser.user.id,
+          employeeUser.tenantId || '',
+          {
+            type: updateStatusDto.status === 'approved' ? 'leave_approved' : 'leave_rejected',
+            title: updateStatusDto.status === 'approved' ? 'Leave Request Approved' : 'Leave Request Rejected',
+            message: updateStatusDto.status === 'approved' 
+              ? `Your ${leaveRequest.leaveType} leave request has been approved.`
+              : `Your ${leaveRequest.leaveType} leave request has been rejected.${updateStatusDto.comments ? ` Reason: ${updateStatusDto.comments}` : ''}`,
+            category: 'Leave',
+          }
+        );
+      }
+    } catch (notificationError) {
+      this.logger.warn('Failed to send leave status update notifications:', notificationError);
+      // Don't fail the status update if notification fails
+    }
 
     return this.getLeaveRequestById(leaveRequestId);
   }
@@ -1511,6 +1637,125 @@ export class LeaveService {
     } catch (error) {
       console.error(`❌ ERROR - Failed to get stored paid days for ${employeeId}, ${month}:`, error);
       return 0;
+    }
+  }
+
+  /**
+   * Send notifications to TO (approvers) and CC employees for new leave request
+   */
+  private async sendNotificationsToApproversAndCC(
+    leaveRequestId: string,
+    employeeName: string,
+    leaveType: string,
+    days: number,
+    tenantId: string
+  ): Promise<void> {
+    try {
+      // Get the leave request data for dates
+      const leaveRequest = await this.leaveRequestModel.findByPk(leaveRequestId);
+      if (!leaveRequest) {
+        throw new Error('Leave request not found');
+      }
+
+      // Get TO employees (approvers)
+      const approvers = await this.leaveApproverModel.findAll({
+        where: { leaveRequestId },
+        include: [
+          {
+            model: Employee,
+            include: [
+              {
+                model: User,
+                attributes: ['id']
+              }
+            ]
+          }
+        ]
+      });
+
+      // Get CC employees
+      const ccEmployees = await this.leaveCcModel.findAll({
+        where: { leaveRequestId },
+        include: [
+          {
+            model: Employee,
+            include: [
+              {
+                model: User,
+                attributes: ['id']
+              }
+            ]
+          }
+        ]
+      });
+
+      const notification = {
+        type: 'leave_request_new',
+        title: 'New Leave Request',
+        message: `${employeeName} has submitted a new ${leaveType} leave request for ${days} days.`,
+        category: 'Leave',
+      };
+
+      const leaveData = {
+        leaveType,
+        startDate: leaveRequest.startDate.toString(),
+        endDate: leaveRequest.endDate.toString(),
+        days,
+      };
+
+      // Send notifications to TO employees (approvers)
+      for (const approver of approvers) {
+        if (approver.employee?.user?.id) {
+          try {
+            await this.notificationsService.createLeaveNotification(
+              approver.employee.user.id,
+              tenantId,
+              approver.employee.employeeId,
+              NotificationType.LEAVE_PENDING,
+              leaveData,
+              leaveRequestId
+            );
+
+            // Send real-time notification
+            await this.notificationsGateway.sendToUser(
+              approver.employee.user.id,
+              notification
+            );
+          } catch (error) {
+            console.warn(`Failed to send notification to approver ${approver.employee.employeeId}:`, error);
+          }
+        }
+      }
+
+      // Send notifications to CC employees
+      for (const ccEmployee of ccEmployees) {
+        if (ccEmployee.employee?.user?.id) {
+          try {
+            await this.notificationsService.createLeaveNotification(
+              ccEmployee.employee.user.id,
+              tenantId,
+              ccEmployee.employee.employeeId,
+              NotificationType.LEAVE_PENDING,
+              leaveData,
+              leaveRequestId
+            );
+
+            // Send real-time notification
+            await this.notificationsGateway.sendToUser(
+              ccEmployee.employee.user.id,
+              notification
+            );
+          } catch (error) {
+            console.warn(`Failed to send notification to CC employee ${ccEmployee.employee.employeeId}:`, error);
+          }
+        }
+      }
+
+      console.log(`✅ Sent notifications to ${approvers.length} approvers and ${ccEmployees.length} CC employees for leave request ${leaveRequestId}`);
+
+    } catch (error) {
+      console.error('Failed to send notifications to approvers and CC:', error);
+      throw error;
     }
   }
 }
