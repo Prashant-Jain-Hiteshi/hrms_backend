@@ -18,10 +18,12 @@ import { StatutorySettings } from './models/statutory-settings.model';
 import { CompanyPayrollInfo } from './models/company-payroll-info.model';
 import { Company } from '../companies/companies.model';
 import { LeaveModule } from '../leave/leave.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
     LeaveModule,
+    NotificationsModule,
     SequelizeModule.forFeature([
       Payroll,
       Employee,

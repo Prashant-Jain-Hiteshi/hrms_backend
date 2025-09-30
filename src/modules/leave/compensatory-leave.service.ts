@@ -10,6 +10,8 @@ import {
   CompensatoryLeaveQueryDto,
   CompensatoryCreditsSummaryDto 
 } from './dto/compensatory-leave.dto';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationsGateway } from '../notifications/notifications.gateway';
 
 @Injectable()
 export class CompensatoryLeaveService {
@@ -20,12 +22,31 @@ export class CompensatoryLeaveService {
     private userModel: typeof User,
     @InjectModel(Employee)
     private employeeModel: typeof Employee,
+    private notificationsService: NotificationsService,
+    private notificationsGateway: NotificationsGateway,
   ) {}
 
   async create(createDto: CreateCompensatoryLeaveDto, assignedByUserId: string, tenantId: string): Promise<CompensatoryLeave> {
-    console.log('🔍 CompensatoryLeave create - DTO:', createDto);
-    console.log('🔍 CompensatoryLeave create - assignedByUserId:', assignedByUserId);
-    console.log('🔍 CompensatoryLeave create - tenantId:', tenantId);
+    try {
+      console.log('🔍 CompensatoryLeave create - DTO:', createDto);
+      console.log('🔍 CompensatoryLeave create - assignedByUserId:', assignedByUserId);
+      console.log('🔍 CompensatoryLeave create - tenantId:', tenantId);
+
+      // Validate input parameters
+      if (!createDto) {
+        console.error('❌ BAD_REQUEST: CreateDto is required');
+        throw new BadRequestException('CreateDto is required');
+      }
+
+      if (!assignedByUserId) {
+        console.error('❌ BAD_REQUEST: AssignedByUserId is required');
+        throw new BadRequestException('AssignedByUserId is required');
+      }
+
+      if (!tenantId) {
+        console.error('❌ BAD_REQUEST: TenantId is required');
+        throw new BadRequestException('TenantId is required');
+      }
     
     // Find employee by ID within the same tenant
     const whereClause: any = { id: createDto.employeeId };
@@ -48,6 +69,11 @@ export class CompensatoryLeaveService {
     console.log('🔍 Employee found:', employee ? `${employee.name} (${employee.employeeId})` : 'NOT FOUND');
 
     if (!employee) {
+      console.error('❌ NOT_FOUND: Employee not found in organization:', {
+        employeeId: createDto.employeeId,
+        tenantId: tenantId,
+        errorType: 'NotFoundException'
+      });
       throw new NotFoundException('Employee not found in your organization');
     }
 
@@ -71,6 +97,12 @@ export class CompensatoryLeaveService {
     console.log('🔍 User found:', user ? `${user.firstName} ${user.lastName} (${user.email})` : 'NOT FOUND');
 
     if (!user) {
+      console.error('❌ BAD_REQUEST: Employee not associated with user account:', {
+        employeeEmail: employee.email,
+        employeeId: createDto.employeeId,
+        tenantId: tenantId,
+        errorType: 'BadRequestException'
+      });
       throw new BadRequestException('Employee is not associated with a user account');
     }
 
@@ -80,6 +112,12 @@ export class CompensatoryLeaveService {
     console.log('🔍 Date validation - Today:', today.toISOString().split('T')[0], 'Expiry:', createDto.expiryDate);
     
     if (expiryDate <= today) {
+      console.error('❌ BAD_REQUEST: Expiry date must be in the future:', {
+        expiryDate: createDto.expiryDate,
+        today: today.toISOString().split('T')[0],
+        employeeId: createDto.employeeId,
+        errorType: 'BadRequestException'
+      });
       throw new BadRequestException('Expiry date must be in the future');
     }
 
@@ -113,7 +151,78 @@ export class CompensatoryLeaveService {
     
     console.log('✅ Compensatory leave created with ID:', compensatoryLeave.id);
 
+    // Send notification to employee about compensatory leave assignment
+    try {
+      console.log('🔔 Attempting to send compensatory leave notification...');
+      
+      // Get the HR user who assigned the credits
+      const assignedByUser = await this.userModel.findByPk(assignedByUserId);
+      if (!assignedByUser) {
+        console.error('❌ NOT_FOUND: Assigned by user not found:', assignedByUserId);
+        throw new NotFoundException('Assigned by user not found');
+      }
+
+      const assignedByName = `${assignedByUser.firstName} ${assignedByUser.lastName}`.trim() || assignedByUser.email;
+      console.log('🔍 Assigned by user found:', assignedByName);
+
+      // Create persistent notification
+      const relatedEntityId = compensatoryLeave.id.toString();
+      console.log('🔍 Creating notification with relatedEntityId:', relatedEntityId, 'type:', typeof relatedEntityId);
+      
+      await this.notificationsService.createCompensatoryLeaveNotification(
+        user.id,
+        tenantId,
+        employee.employeeId,
+        {
+          credits: createDto.credits,
+          expiryDate: createDto.expiryDate,
+          assignedByName: assignedByName,
+          reason: createDto.reason,
+        },
+        relatedEntityId
+      );
+
+      // Send real-time notification
+      const realtimeNotification = {
+        type: 'compensatory_leave_assigned',
+        title: 'Compensatory Leave Credits Assigned',
+        message: `You have been assigned ${createDto.credits} compensatory leave credits by ${assignedByName}. Valid until: ${createDto.expiryDate}`,
+        category: 'Leave',
+      };
+
+      await this.notificationsGateway.sendToUser(user.id, realtimeNotification);
+      
+      console.log('✅ Compensatory leave notification sent successfully to employee:', employee.employeeId);
+
+    } catch (notificationError) {
+      console.error('❌ NOTIFICATION_ERROR: Failed to send compensatory leave notification:', {
+        error: notificationError.message,
+        errorType: notificationError.constructor.name,
+        employeeId: employee.employeeId,
+        userId: user.id,
+        compensatoryLeaveId: compensatoryLeave.id,
+        stack: notificationError.stack
+      });
+      
+      // Don't fail the compensatory leave creation if notification fails
+      console.log('⚠️ WARNING: Compensatory leave created but notification failed');
+    }
+
     return this.findOne(compensatoryLeave.id, tenantId);
+
+    } catch (error) {
+      console.error('❌ FATAL_ERROR: Failed to create compensatory leave:', {
+        error: error.message,
+        errorType: error.constructor.name,
+        employeeId: createDto?.employeeId,
+        assignedByUserId,
+        tenantId,
+        stack: error.stack
+      });
+      
+      // Re-throw the original error
+      throw error;
+    }
   }
 
   async findAll(query: CompensatoryLeaveQueryDto = {}, tenantId: string): Promise<CompensatoryLeave[]> {

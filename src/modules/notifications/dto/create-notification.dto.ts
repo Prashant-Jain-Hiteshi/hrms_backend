@@ -7,10 +7,16 @@ export enum NotificationType {
   LEAVE_PENDING = 'leave_pending',
   LEAVE_CANCELLED = 'leave_cancelled',
   LEAVE_BALANCE_UPDATED = 'leave_balance_updated',
+  COMPENSATORY_LEAVE_ASSIGNED = 'compensatory_leave_assigned',
   
   // Payroll
   PAYSLIP_GENERATED = 'payslip_generated',
   SALARY_PROCESSED = 'salary_processed',
+  PAYROLL_HR_APPROVED = 'payroll_hr_approved',
+  PAYROLL_FINANCE_APPROVED = 'payroll_finance_approved',
+  SALARY_TRANSFER_INITIATED = 'salary_transfer_initiated',
+  SALARY_TRANSFER_COMPLETED = 'salary_transfer_completed',
+  SALARY_TRANSFER_FAILED = 'salary_transfer_failed',
   
   // General
   PROFILE_UPDATED = 'profile_updated',

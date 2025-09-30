@@ -87,9 +87,9 @@ export class Notification extends Model<Notification> {
 
   @AllowNull(true)
   @Column({
-    type: DataType.UUID,
+    type: DataType.STRING(50),
   })
-  relatedEntityId: string | null; // ID of the related entity
+  relatedEntityId: string | null; // ID of the related entity (UUID or numeric ID)
 
   // Additional metadata for leave notifications
   @AllowNull(true)

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import { Op } from 'sequelize';
 import { Notification } from './entities/notification.entity';
@@ -39,13 +39,16 @@ export class NotificationsService {
       
       console.log(`  Notification created for user ${createNotificationDto.employeeId}:`, {
         type: createNotificationDto.type,
-        title: createNotificationDto.title,
         category: createNotificationDto.category
       });
 
       return new NotificationResponseDto(savedNotification.toJSON());
     } catch (error) {
-      console.error('  Error creating notification:', error);
+      console.error('❌ ERROR: Failed to create notification:', {
+        error: error.message,
+        errorType: error.constructor.name,
+        stack: error.stack
+      });
       throw error;
     }
   }
@@ -117,11 +120,30 @@ export class NotificationsService {
    */
   async markAsRead(id: string, userId: string, tenantId: string): Promise<NotificationResponseDto> {
     try {
+      console.log('🔍 NotificationsService.markAsRead - ID:', id, 'userId:', userId, 'tenantId:', tenantId);
+      
+      // Validate input parameters
+      if (!id || id === 'undefined' || id === 'null') {
+        console.error('❌ BAD_REQUEST: Invalid notification ID in service:', id);
+        throw new BadRequestException('Invalid notification ID');
+      }
+
+      if (!userId) {
+        console.error('❌ BAD_REQUEST: userId is required for markAsRead');
+        throw new BadRequestException('User ID is required');
+      }
+
+      if (!tenantId) {
+        console.error('❌ BAD_REQUEST: tenantId is required for markAsRead');
+        throw new BadRequestException('Tenant ID is required');
+      }
+
       const notification = await this.notificationModel.findOne({
         where: { id, userId, tenantId }
       });
 
       if (!notification) {
+        console.error('❌ NOT_FOUND: Notification not found:', { id, userId, tenantId });
         throw new NotFoundException('Notification not found');
       }
 
@@ -297,5 +319,329 @@ export class NotificationsService {
     };
 
     return this.create(createDto);
+  }
+
+  /**
+   * Create compensatory leave assignment notification
+   */
+  async createCompensatoryLeaveNotification(
+    userId: string,
+    tenantId: string,
+    employeeId: string,
+    compensatoryData: {
+      credits: number;
+      expiryDate: string;
+      assignedByName: string;
+      reason: string;
+    },
+    relatedEntityId: string
+  ): Promise<NotificationResponseDto> {
+    try {
+      console.log('🔔 Creating compensatory leave notification for:', { userId, employeeId, credits: compensatoryData.credits });
+
+      if (!userId) {
+        console.error('❌ BAD_REQUEST: userId is required for compensatory leave notification');
+        throw new Error('UserId is required');
+      }
+
+      if (!tenantId) {
+        console.error('❌ BAD_REQUEST: tenantId is required for compensatory leave notification');
+        throw new Error('TenantId is required');
+      }
+
+      if (!employeeId) {
+        console.error('❌ BAD_REQUEST: employeeId is required for compensatory leave notification');
+        throw new Error('EmployeeId is required');
+      }
+
+      if (!compensatoryData.credits || compensatoryData.credits <= 0) {
+        console.error('❌ BAD_REQUEST: Invalid credits value for compensatory leave notification:', compensatoryData.credits);
+        throw new Error('Invalid credits value');
+      }
+
+      const title = 'Compensatory Leave Credits Assigned';
+      const message = `You have been assigned ${compensatoryData.credits} compensatory leave credits by ${compensatoryData.assignedByName}. Reason: ${compensatoryData.reason}. Valid until: ${compensatoryData.expiryDate}`;
+
+      const createDto: CreateNotificationDto = {
+        userId,
+        tenantId,
+        employeeId,
+        title,
+        message,
+        type: NotificationType.COMPENSATORY_LEAVE_ASSIGNED,
+        category: 'Leave',
+        priority: NotificationPriority.NORMAL,
+        relatedEntityType: 'compensatory_leave',
+        relatedEntityId,
+        metadata: compensatoryData
+      };
+
+      console.log('✅ Compensatory leave notification created successfully for employee:', employeeId);
+      return this.create(createDto);
+
+    } catch (error) {
+      console.error('❌ ERROR: Failed to create compensatory leave notification:', {
+        error: error.message,
+        errorType: error.constructor.name,
+        userId,
+        employeeId,
+        tenantId,
+        stack: error.stack
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Create payroll HR approval notification (HR → Finance)
+   */
+  async createPayrollHRApprovalNotification(
+    financeUsers: any[],
+    tenantId: string,
+    payrollData: {
+      employeeCount: number;
+      totalAmount: number;
+      month: string;
+      approvedByName: string;
+      employeeNames?: string[];
+      isBulk: boolean;
+    },
+    relatedEntityId: string
+  ): Promise<void> {
+    try {
+      console.log('🔔 Creating payroll HR approval notifications for Finance team:', {
+        financeUserCount: financeUsers.length,
+        payrollData,
+        relatedEntityId
+      });
+
+      // Create message based on single or bulk approval
+      const title = payrollData.isBulk 
+        ? 'Bulk Payroll Approved by HR'
+        : 'Payroll Approved by HR';
+
+      const message = payrollData.isBulk
+        ? `Bulk payroll approved for ${payrollData.employeeCount} employees (${payrollData.month}) by ${payrollData.approvedByName}. Total: ₹${payrollData.totalAmount.toLocaleString()}`
+        : `Payroll approved for ${payrollData.employeeNames?.[0]} (${payrollData.month}) by ${payrollData.approvedByName}. Amount: ₹${payrollData.totalAmount.toLocaleString()}`;
+
+      // Send notification to each Finance user
+      for (const financeUser of financeUsers) {
+        try {
+          const createDto: CreateNotificationDto = {
+            userId: financeUser.id,
+            tenantId,
+            employeeId: financeUser.employeeId || 'FINANCE_TEAM',
+            title,
+            message,
+            type: NotificationType.PAYROLL_HR_APPROVED,
+            category: 'Payroll',
+            priority: NotificationPriority.HIGH,
+            relatedEntityType: 'payroll_approval',
+            relatedEntityId,
+            metadata: payrollData
+          };
+
+          await this.create(createDto);
+          console.log('✅ Payroll HR approval notification sent to Finance user:', financeUser.email);
+
+        } catch (userError) {
+          console.error('❌ NOTIFICATION_ERROR: Failed to send notification to Finance user:', {
+            error: userError.message,
+            errorType: userError.constructor.name,
+            financeUserId: financeUser.id,
+            financeUserEmail: financeUser.email
+          });
+        }
+      }
+
+    } catch (error) {
+      console.error('❌ FATAL_ERROR: Failed to create payroll HR approval notifications:', {
+        error: error.message,
+        errorType: error.constructor.name,
+        tenantId,
+        stack: error.stack
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Create payroll Finance approval notification (Finance → HR/Admin)
+   */
+  async createPayrollFinanceApprovalNotification(
+    hrAdminUsers: any[],
+    tenantId: string,
+    payrollData: {
+      employeeCount: number;
+      totalAmount: number;
+      month: string;
+      approvedByName: string;
+      employeeNames?: string[];
+      isBulk: boolean;
+    },
+    relatedEntityId: string
+  ): Promise<void> {
+    try {
+      console.log('🔔 Creating payroll Finance approval notifications for HR/Admin team:', {
+        hrAdminUserCount: hrAdminUsers.length,
+        payrollData,
+        relatedEntityId
+      });
+
+      // Create message based on single or bulk approval
+      const title = payrollData.isBulk 
+        ? 'Bulk Payroll Finalized by Finance'
+        : 'Payroll Finalized by Finance';
+
+      const message = payrollData.isBulk
+        ? `Bulk payroll finalized for ${payrollData.employeeCount} employees (${payrollData.month}) by ${payrollData.approvedByName}. Total: ₹${payrollData.totalAmount.toLocaleString()}`
+        : `Payroll finalized for ${payrollData.employeeNames?.[0]} (${payrollData.month}) by ${payrollData.approvedByName}. Amount: ₹${payrollData.totalAmount.toLocaleString()}`;
+
+      // Send notification to each HR/Admin user
+      for (const hrAdminUser of hrAdminUsers) {
+        try {
+          const createDto: CreateNotificationDto = {
+            userId: hrAdminUser.id,
+            tenantId,
+            employeeId: hrAdminUser.employeeId || 'HR_ADMIN_TEAM',
+            title,
+            message,
+            type: NotificationType.PAYROLL_FINANCE_APPROVED,
+            category: 'Payroll',
+            priority: NotificationPriority.NORMAL,
+            relatedEntityType: 'payroll_finalization',
+            relatedEntityId,
+            metadata: payrollData
+          };
+
+          await this.create(createDto);
+          console.log('✅ Payroll Finance approval notification sent to HR/Admin user:', hrAdminUser.email);
+
+        } catch (userError) {
+          console.error('❌ NOTIFICATION_ERROR: Failed to send notification to HR/Admin user:', {
+            error: userError.message,
+            errorType: userError.constructor.name,
+            hrAdminUserId: hrAdminUser.id,
+            hrAdminUserEmail: hrAdminUser.email
+          });
+        }
+      }
+
+    } catch (error) {
+      console.error('❌ FATAL_ERROR: Failed to create payroll Finance approval notifications:', {
+        error: error.message,
+        errorType: error.constructor.name,
+        tenantId,
+        stack: error.stack
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Create salary transfer notification for employee
+   */
+  async createSalaryTransferNotification(
+    userId: string,
+    tenantId: string,
+    employeeId: string,
+    transferData: {
+      amount: number;
+      bankName: string;
+      accountNumber: string;
+      transactionId?: string;
+      status: 'initiated' | 'completed' | 'failed';
+      transferredByName: string;
+      month: string;
+    },
+    relatedEntityId: string
+  ): Promise<NotificationResponseDto> {
+    try {
+      console.log('🔔 Creating salary transfer notification for employee:', {
+        userId,
+        employeeId,
+        transferData,
+        relatedEntityId
+      });
+
+      // Validate required parameters
+      if (!userId) {
+        console.error('❌ BAD_REQUEST: userId is required for salary transfer notification');
+        throw new BadRequestException('UserId is required');
+      }
+
+      if (!tenantId) {
+        console.error('❌ BAD_REQUEST: tenantId is required for salary transfer notification');
+        throw new BadRequestException('TenantId is required');
+      }
+
+      if (!employeeId) {
+        console.error('❌ BAD_REQUEST: employeeId is required for salary transfer notification');
+        throw new BadRequestException('EmployeeId is required');
+      }
+
+      // Create notification based on transfer status
+      let title: string;
+      let message: string;
+      let notificationType: NotificationType;
+      let priority: NotificationPriority;
+
+      const maskedAccount = `****${transferData.accountNumber.slice(-4)}`;
+
+      switch (transferData.status) {
+        case 'initiated':
+          title = 'Salary Transfer Initiated';
+          message = `Your salary transfer of ₹${transferData.amount.toLocaleString()} has been initiated by ${transferData.transferredByName} to ${transferData.bankName} ${maskedAccount}. Transaction ID: ${transferData.transactionId}`;
+          notificationType = NotificationType.SALARY_TRANSFER_INITIATED;
+          priority = NotificationPriority.HIGH;
+          break;
+
+        case 'completed':
+          title = 'Salary Transfer Completed';
+          message = `Your salary of ₹${transferData.amount.toLocaleString()} has been successfully transferred to your ${transferData.bankName} account ${maskedAccount}. Transaction ID: ${transferData.transactionId}`;
+          notificationType = NotificationType.SALARY_TRANSFER_COMPLETED;
+          priority = NotificationPriority.HIGH;
+          break;
+
+        case 'failed':
+          title = 'Salary Transfer Failed';
+          message = `Your salary transfer of ₹${transferData.amount.toLocaleString()} to ${transferData.bankName} ${maskedAccount} has failed. Please contact Finance for assistance. Transaction ID: ${transferData.transactionId}`;
+          notificationType = NotificationType.SALARY_TRANSFER_FAILED;
+          priority = NotificationPriority.HIGH;
+          break;
+
+        default:
+          throw new BadRequestException('Invalid transfer status');
+      }
+
+      const createDto: CreateNotificationDto = {
+        userId,
+        tenantId,
+        employeeId,
+        title,
+        message,
+        type: notificationType,
+        category: 'Payroll',
+        priority,
+        relatedEntityType: 'salary_transfer',
+        relatedEntityId,
+        metadata: transferData
+      };
+
+      console.log('✅ Salary transfer notification created successfully for employee:', employeeId);
+      return this.create(createDto);
+
+    } catch (error) {
+      console.error('❌ ERROR: Failed to create salary transfer notification:', {
+        error: error.message,
+        errorType: error.constructor.name,
+        userId,
+        employeeId,
+        tenantId,
+        transferStatus: transferData?.status,
+        stack: error.stack
+      });
+      throw error;
+    }
   }
 }

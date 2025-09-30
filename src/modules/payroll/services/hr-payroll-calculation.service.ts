@@ -10,6 +10,8 @@ import { StatutorySettings } from '../models/statutory-settings.model';
 import { LeaveService } from '../../leave/leave.service';
 import { CalendarService } from '../../leave/calendar.service';
 import { EmployeeMonthlyLeaveRecord } from '../../leave/models/employee-monthly-leave-record.model';
+import { NotificationsService } from '../../notifications/notifications.service';
+import { NotificationsGateway } from '../../notifications/notifications.gateway';
 
 export interface PayrollCalculationInput {
   employeeIds: string[];
@@ -46,6 +48,8 @@ export class HRPayrollCalculationService {
     private readonly leaveService: LeaveService,
     private readonly calendarService: CalendarService,
     private readonly sequelize: Sequelize,
+    private readonly notificationsService: NotificationsService,
+    private readonly notificationsGateway: NotificationsGateway,
   ) {}
 
   async calculatePayrollBatch(input: PayrollCalculationInput): Promise<PayrollCalculationResult> {
@@ -941,6 +945,28 @@ export class HRPayrollCalculationService {
       };
 
       console.log(`✅ BULK APPROVAL COMPLETED:`, result.summary);
+
+      // 4. Send notifications to Finance team (only if there are successful approvals)
+      if (successful.length > 0) {
+        try {
+          await this.sendPayrollApprovalNotifications(
+            successful,
+            approverId,
+            tenantId,
+            approvalNotes || 'Bulk approved by HR'
+          );
+        } catch (notificationError) {
+          console.error('❌ NOTIFICATION_ERROR: Failed to send payroll approval notifications:', {
+            error: notificationError.message,
+            errorType: notificationError.constructor.name,
+            successfulCount: successful.length,
+            tenantId,
+            stack: notificationError.stack
+          });
+          // Don't fail the approval process if notifications fail
+        }
+      }
+
       return result;
 
     } catch (error) {
@@ -1104,6 +1130,29 @@ export class HRPayrollCalculationService {
       await this.createBankDetailsForApprovedPayroll(record, tenantId);
 
       console.log(`✅ Finance approved payroll for ${record.employee?.name}`);
+
+      // Send notification to HR/Admin team
+      try {
+        await this.sendFinanceApprovalNotifications(
+          [{
+            recordId: record.id,
+            employeeName: record.employee?.name,
+            employeeId: record.employee?.employeeId,
+            netSalary: record.netSalary,
+            month: record.month
+          }],
+          approverId,
+          tenantId,
+          approvalNotes
+        );
+      } catch (notificationError) {
+        console.error('❌ NOTIFICATION_ERROR: Failed to send Finance approval notification:', {
+          error: notificationError.message,
+          recordId: record.id,
+          employeeName: record.employee?.name
+        });
+        // Don't fail the approval process if notification fails
+      }
       
       return {
         success: true,
@@ -1201,6 +1250,34 @@ export class HRPayrollCalculationService {
       }
 
       console.log(`✅ Finance bulk approval completed:`, results);
+
+      // Send notifications to HR/Admin team (only for successful approvals)
+      if (results.successful > 0) {
+        try {
+          const successfulRecords = results.details
+            .filter(detail => detail.status === 'success')
+            .map(detail => ({
+              recordId: detail.id,
+              employeeName: detail.employeeName,
+              employeeId: detail.employeeId,
+              netSalary: detail.netSalary,
+              month: records[0]?.month // Assuming all records are for the same month
+            }));
+
+          await this.sendFinanceApprovalNotifications(
+            successfulRecords,
+            approverId,
+            tenantId,
+            approvalNotes
+          );
+        } catch (notificationError) {
+          console.error('❌ NOTIFICATION_ERROR: Failed to send Finance bulk approval notifications:', {
+            error: notificationError.message,
+            successfulCount: results.successful
+          });
+          // Don't fail the approval process if notifications fail
+        }
+      }
       
       return {
         success: true,
@@ -1422,11 +1499,30 @@ export class HRPayrollCalculationService {
           // Simulate processing delay and success/failure (95% success rate)
           setTimeout(async () => {
             const isSuccess = Math.random() > 0.05;
+            const finalStatus = isSuccess ? 'COMPLETED' : 'FAILED';
             
             await bankDetail.update({
-              transferStatus: isSuccess ? 'COMPLETED' : 'FAILED',
+              transferStatus: finalStatus,
               transferredAt: isSuccess ? new Date() : null
             });
+
+            // Send transfer completion/failure notification to employee
+            try {
+              await this.sendSalaryTransferNotification(
+                bankDetail,
+                financeUserId,
+                tenantId,
+                isSuccess ? 'completed' : 'failed',
+                transactionId
+              );
+            } catch (notificationError) {
+              console.error('❌ NOTIFICATION_ERROR: Failed to send transfer completion notification:', {
+                error: notificationError.message,
+                employeeName: bankDetail.employee?.name,
+                transactionId,
+                finalStatus
+              });
+            }
           }, 2000 + Math.random() * 1000); // 2-3 second delay
 
           results.successful++;
@@ -1439,6 +1535,24 @@ export class HRPayrollCalculationService {
           });
 
           console.log(`✅ Initiated transfer for ${bankDetail.employee?.name}: ${transactionId}`);
+
+          // Send transfer initiation notification to employee
+          try {
+            await this.sendSalaryTransferNotification(
+              bankDetail,
+              financeUserId,
+              tenantId,
+              'initiated',
+              transactionId
+            );
+          } catch (notificationError) {
+            console.error('❌ NOTIFICATION_ERROR: Failed to send transfer initiation notification:', {
+              error: notificationError.message,
+              employeeName: bankDetail.employee?.name,
+              transactionId
+            });
+            // Don't fail the transfer process if notification fails
+          }
 
         } catch (error) {
           results.failed++;
@@ -1923,6 +2037,338 @@ export class HRPayrollCalculationService {
     } catch (error) {
       console.error(`❌ ERROR GENERATING BANK TRANSFER REPORT:`, error);
       throw new Error(`Failed to generate bank transfer report: ${error.message}`);
+    }
+  }
+
+  /**
+   * Send payroll approval notifications to Finance team
+   */
+  private async sendPayrollApprovalNotifications(
+    approvedRecords: any[],
+    approverId: string,
+    tenantId: string,
+    approvalNotes: string
+  ): Promise<void> {
+    try {
+      console.log('🔔 Sending payroll approval notifications to Finance team...');
+
+      // 1. Get Finance users for this tenant
+      const financeUsers = await this.employeeModel.findAll({
+        where: { tenantId },
+        include: [
+          {
+            model: User,
+            as: 'user',
+            where: { role: 'finance' },
+            attributes: ['id', 'firstName', 'lastName', 'email']
+          }
+        ]
+      });
+
+      if (financeUsers.length === 0) {
+        console.log('⚠️ No Finance users found for tenant:', tenantId);
+        return;
+      }
+
+      console.log('🔍 Found Finance users:', financeUsers.length);
+
+      // 2. Get HR user who approved
+      const hrUser = await User.findByPk(approverId);
+      const approvedByName = hrUser 
+        ? `${hrUser.firstName} ${hrUser.lastName}`.trim() || hrUser.email
+        : 'HR Manager';
+
+      // 3. Calculate totals and prepare data
+      const totalAmount = approvedRecords.reduce((sum, record) => {
+        // We need to get the actual payroll record to get the net salary
+        return sum + (record.netSalary || 0);
+      }, 0);
+
+      // Extract month from the first record (assuming all records are for the same month)
+      const firstRecord = approvedRecords[0];
+      const month = firstRecord?.month || new Date().toISOString().slice(0, 7);
+      const monthYear = new Date(month + '-01').toLocaleDateString('en-US', { 
+        month: 'long', 
+        year: 'numeric' 
+      });
+
+      const payrollData = {
+        employeeCount: approvedRecords.length,
+        totalAmount: totalAmount,
+        month: monthYear,
+        approvedByName: approvedByName,
+        employeeNames: approvedRecords.length === 1 ? [approvedRecords[0].employeeName] : undefined,
+        isBulk: approvedRecords.length > 1
+      };
+
+      console.log('🔍 Payroll notification data:', payrollData);
+
+      // 4. Send persistent notifications
+      const financeUsersList = financeUsers.map(emp => emp.user);
+      await this.notificationsService.createPayrollHRApprovalNotification(
+        financeUsersList,
+        tenantId,
+        payrollData,
+        approvedRecords.map(r => r.recordId).join(',')
+      );
+
+      // 5. Send real-time notifications
+      for (const financeUser of financeUsersList) {
+        if (!financeUser) continue;
+        
+        try {
+          const realtimeNotification = {
+            type: 'payroll_hr_approved',
+            title: payrollData.isBulk ? 'Bulk Payroll Approved by HR' : 'Payroll Approved by HR',
+            message: payrollData.isBulk
+              ? `Bulk payroll approved for ${payrollData.employeeCount} employees (${payrollData.month}) by ${payrollData.approvedByName}. Total: ₹${payrollData.totalAmount.toLocaleString()}`
+              : `Payroll approved for ${payrollData.employeeNames?.[0]} (${payrollData.month}) by ${payrollData.approvedByName}. Amount: ₹${payrollData.totalAmount.toLocaleString()}`,
+            category: 'Payroll',
+          };
+
+          await this.notificationsGateway.sendToUser(financeUser.id, realtimeNotification);
+          console.log('✅ Real-time payroll notification sent to Finance user:', financeUser.email);
+
+        } catch (realtimeError) {
+          console.error('❌ REALTIME_NOTIFICATION_ERROR:', {
+            error: realtimeError.message,
+            financeUserId: financeUser?.id,
+            financeUserEmail: financeUser?.email
+          });
+        }
+      }
+
+      console.log('✅ Payroll approval notifications sent successfully to Finance team');
+
+    } catch (error) {
+      console.error('❌ FATAL_ERROR: Failed to send payroll approval notifications:', {
+        error: error.message,
+        errorType: error.constructor.name,
+        approvedRecordsCount: approvedRecords.length,
+        tenantId,
+        stack: error.stack
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Send Finance approval notifications to HR/Admin team
+   */
+  private async sendFinanceApprovalNotifications(
+    approvedRecords: any[],
+    approverId: string,
+    tenantId: string,
+    approvalNotes: string
+  ): Promise<void> {
+    try {
+      console.log('🔔 Sending Finance approval notifications to HR/Admin team...');
+
+      // 1. Get HR and Admin users for this tenant
+      const hrAdminUsers = await this.employeeModel.findAll({
+        where: { tenantId },
+        include: [
+          {
+            model: User,
+            as: 'user',
+            where: { 
+              role: { [Op.in]: ['hr', 'admin'] }
+            },
+            attributes: ['id', 'firstName', 'lastName', 'email', 'role']
+          }
+        ]
+      });
+
+      if (hrAdminUsers.length === 0) {
+        console.log('⚠️ No HR/Admin users found for tenant:', tenantId);
+        return;
+      }
+
+      console.log('🔍 Found HR/Admin users:', hrAdminUsers.length);
+
+      // 2. Get Finance user who approved
+      const financeUser = await User.findByPk(approverId);
+      const approvedByName = financeUser 
+        ? `${financeUser.firstName} ${financeUser.lastName}`.trim() || financeUser.email
+        : 'Finance Manager';
+
+      // 3. Calculate totals and prepare data
+      const totalAmount = approvedRecords.reduce((sum, record) => {
+        return sum + (record.netSalary || 0);
+      }, 0);
+
+      // Extract month from the first record (assuming all records are for the same month)
+      const firstRecord = approvedRecords[0];
+      const month = firstRecord?.month || new Date().toISOString().slice(0, 7);
+      const monthYear = new Date(month + '-01').toLocaleDateString('en-US', { 
+        month: 'long', 
+        year: 'numeric' 
+      });
+
+      const payrollData = {
+        employeeCount: approvedRecords.length,
+        totalAmount: totalAmount,
+        month: monthYear,
+        approvedByName: approvedByName,
+        employeeNames: approvedRecords.length === 1 ? [approvedRecords[0].employeeName] : undefined,
+        isBulk: approvedRecords.length > 1
+      };
+
+      console.log('🔍 Finance approval notification data:', payrollData);
+
+      // 4. Send persistent notifications
+      const hrAdminUsersList = hrAdminUsers.map(emp => emp.user).filter(user => user);
+      await this.notificationsService.createPayrollFinanceApprovalNotification(
+        hrAdminUsersList,
+        tenantId,
+        payrollData,
+        approvedRecords.map(r => r.recordId).join(',')
+      );
+
+      // 5. Send real-time notifications
+      for (const hrAdminUser of hrAdminUsersList) {
+        if (!hrAdminUser) continue;
+        
+        try {
+          const realtimeNotification = {
+            type: 'payroll_finance_approved',
+            title: payrollData.isBulk ? 'Bulk Payroll Finalized by Finance' : 'Payroll Finalized by Finance',
+            message: payrollData.isBulk
+              ? `Bulk payroll finalized for ${payrollData.employeeCount} employees (${payrollData.month}) by ${payrollData.approvedByName}. Total: ₹${payrollData.totalAmount.toLocaleString()}`
+              : `Payroll finalized for ${payrollData.employeeNames?.[0]} (${payrollData.month}) by ${payrollData.approvedByName}. Amount: ₹${payrollData.totalAmount.toLocaleString()}`,
+            category: 'Payroll',
+          };
+
+          await this.notificationsGateway.sendToUser(hrAdminUser.id, realtimeNotification);
+          console.log('✅ Real-time Finance approval notification sent to HR/Admin user:', hrAdminUser.email);
+
+        } catch (realtimeError) {
+          console.error('❌ REALTIME_NOTIFICATION_ERROR:', {
+            error: realtimeError.message,
+            hrAdminUserId: hrAdminUser?.id,
+            hrAdminUserEmail: hrAdminUser?.email
+          });
+        }
+      }
+
+      console.log('✅ Finance approval notifications sent successfully to HR/Admin team');
+
+    } catch (error) {
+      console.error('❌ FATAL_ERROR: Failed to send Finance approval notifications:', {
+        error: error.message,
+        errorType: error.constructor.name,
+        approvedRecordsCount: approvedRecords.length,
+        tenantId,
+        stack: error.stack
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Send salary transfer notification to employee
+   */
+  private async sendSalaryTransferNotification(
+    bankDetail: any,
+    financeUserId: string,
+    tenantId: string,
+    status: 'initiated' | 'completed' | 'failed',
+    transactionId: string
+  ): Promise<void> {
+    try {
+      console.log('🔔 Sending salary transfer notification to employee...');
+
+      // Get the employee's user account
+      const employee = await this.employeeModel.findOne({
+        where: { 
+          id: bankDetail.employeeId,
+          tenantId 
+        },
+        include: [
+          {
+            model: User,
+            as: 'user',
+            attributes: ['id', 'firstName', 'lastName', 'email']
+          }
+        ]
+      });
+
+      if (!employee || !employee.user) {
+        console.log('⚠️ Employee or user account not found for transfer notification:', bankDetail.employeeId);
+        return;
+      }
+
+      // Get Finance user who initiated the transfer
+      const financeUser = await User.findByPk(financeUserId);
+      const transferredByName = financeUser 
+        ? `${financeUser.firstName} ${financeUser.lastName}`.trim() || financeUser.email
+        : 'Finance Team';
+
+      // Get payroll record to extract month information
+      const payrollRecord = await this.payrollRecordModel.findOne({
+        where: { 
+          employeeId: bankDetail.employeeId,
+          tenantId,
+          status: 'FINANCE_APPROVED'
+        },
+        order: [['createdAt', 'DESC']]
+      });
+
+      const month = payrollRecord?.month || new Date().toISOString().slice(0, 7);
+      const monthYear = new Date(month + '-01').toLocaleDateString('en-US', { 
+        month: 'long', 
+        year: 'numeric' 
+      });
+
+      const transferData = {
+        amount: bankDetail.transferAmount,
+        bankName: bankDetail.bankName,
+        accountNumber: bankDetail.accountNumber,
+        transactionId: transactionId,
+        status: status,
+        transferredByName: transferredByName,
+        month: monthYear
+      };
+
+      console.log('🔍 Transfer notification data:', transferData);
+
+      // Send persistent notification
+      await this.notificationsService.createSalaryTransferNotification(
+        employee.user.id,
+        tenantId,
+        employee.employeeId,
+        transferData,
+        bankDetail.id
+      );
+
+      // Send real-time notification
+      const realtimeNotification = {
+        type: `salary_transfer_${status}`,
+        title: status === 'initiated' ? 'Salary Transfer Initiated' : 
+               status === 'completed' ? 'Salary Transfer Completed' : 
+               'Salary Transfer Failed',
+        message: status === 'initiated' 
+          ? `Your salary transfer of ₹${transferData.amount.toLocaleString()} has been initiated to ${transferData.bankName}. Transaction ID: ${transactionId}`
+          : status === 'completed'
+          ? `Your salary of ₹${transferData.amount.toLocaleString()} has been successfully transferred to your ${transferData.bankName} account. Transaction ID: ${transactionId}`
+          : `Your salary transfer of ₹${transferData.amount.toLocaleString()} has failed. Please contact Finance. Transaction ID: ${transactionId}`,
+        category: 'Payroll',
+      };
+
+      await this.notificationsGateway.sendToUser(employee.user.id, realtimeNotification);
+      console.log('✅ Salary transfer notification sent successfully to employee:', employee.user.email);
+
+    } catch (error) {
+      console.error('❌ FATAL_ERROR: Failed to send salary transfer notification:', {
+        error: error.message,
+        errorType: error.constructor.name,
+        employeeId: bankDetail?.employeeId,
+        transactionId,
+        status,
+        tenantId,
+        stack: error.stack
+      });
+      throw error;
     }
   }
 }

@@ -1,20 +1,21 @@
-import { 
-  Controller, 
-  Get, 
-  Post, 
-  Put, 
-  Delete, 
-  Body, 
-  Param, 
-  Query, 
-  UseGuards, 
-  Request 
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Body,
+  Param,
+  Query,
+  Request,
+  UseGuards,
+  BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { NotificationsService } from './notifications.service';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { NotificationQueryDto } from './dto/notification-query.dto';
-
 @Controller('notifications')
 @UseGuards(JwtAuthGuard)
 export class NotificationsController {
@@ -58,7 +59,17 @@ export class NotificationsController {
    */
   @Put(':id/read')
   async markAsRead(@Param('id') id: string, @Request() req: any) {
+    console.log('🔍 Mark as read request - ID:', id, 'Type:', typeof id);
+    
+    // Validate notification ID
+    if (!id || id === 'undefined' || id === 'null') {
+      console.error('❌ BAD_REQUEST: Invalid notification ID:', id);
+      throw new BadRequestException('Invalid notification ID provided');
+    }
+
     const { id: userId, tenantId } = req.user;
+    console.log('🔍 User details - userId:', userId, 'tenantId:', tenantId);
+    
     return this.notificationsService.markAsRead(id, userId, tenantId);
   }
 
