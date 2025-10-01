@@ -275,7 +275,165 @@ export class EmployeesService {
     }
   }
 
-  // Tenant-aware employee listing - ALWAYS filter by tenantId
+  // Enhanced employee listing with pagination, search and filters
+  async findAllWithFilters(
+    queryParams: {
+      page: number;
+      limit: number;
+      search: string;
+      department: string;
+      status: string;
+      sortBy: string;
+      sortOrder: 'asc' | 'desc';
+    },
+    tenantId: string,
+  ): Promise<{
+    employees: Employee[];
+    pagination: {
+      currentPage: number;
+      totalPages: number;
+      totalRecords: number;
+      limit: number;
+      hasNext: boolean;
+      hasPrev: boolean;
+    };
+    filters: {
+      departments: string[];
+      statuses: string[];
+    };
+  }> {
+    // Always require tenantId
+    if (!tenantId) {
+      this.logger.warn('No tenantId provided - returning empty result');
+      return {
+        employees: [],
+        pagination: {
+          currentPage: 1,
+          totalPages: 0,
+          totalRecords: 0,
+          limit: queryParams.limit,
+          hasNext: false,
+          hasPrev: false,
+        },
+        filters: { departments: [], statuses: [] },
+      };
+    }
+
+    const { page, limit, search, department, status, sortBy, sortOrder } = queryParams;
+    const offset = (page - 1) * limit;
+
+    // Build where clause
+    const whereClause: any = {
+      // Always filter by tenantId and exclude null values
+      tenantId: {
+        [Op.and]: [
+          { [Op.ne]: null }, // Not null
+          { [Op.eq]: tenantId } // Equals the provided tenantId
+        ]
+      }
+    };
+
+    // Add search filter
+    if (search) {
+      whereClause[Op.or] = [
+        { name: { [Op.iLike]: `%${search}%` } },
+        { email: { [Op.iLike]: `%${search}%` } },
+        { employeeId: { [Op.iLike]: `%${search}%` } }
+      ];
+    }
+
+    // Add department filter
+    if (department) {
+      whereClause.department = { [Op.iLike]: `%${department}%` };
+    }
+
+    // Add status filter
+    if (status) {
+      whereClause.status = status;
+    }
+
+    // Validate and set sort field
+    const allowedSortFields = ['name', 'email', 'employeeId', 'department', 'joiningDate', 'createdAt'];
+    const validSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'joiningDate';
+
+    this.logger.log('Enhanced query filters:', {
+      tenantId,
+      search,
+      department,
+      status,
+      sortBy: validSortBy,
+      sortOrder,
+      page,
+      limit,
+      offset
+    });
+
+    // Execute main query
+    const result = await this.employeeModel.findAndCountAll({
+      where: whereClause,
+      limit,
+      offset,
+      order: [[validSortBy, sortOrder.toUpperCase()]],
+      include: [
+        {
+          model: Company,
+          as: 'company',
+          attributes: ['name', 'companyCode']
+        }
+      ]
+    });
+
+    // Get filter options (departments and statuses)
+    const filterOptionsQuery = await this.employeeModel.findAll({
+      where: {
+        tenantId: {
+          [Op.and]: [
+            { [Op.ne]: null },
+            { [Op.eq]: tenantId }
+          ]
+        }
+      },
+      attributes: ['department', 'status'],
+      group: ['department', 'status'],
+      raw: true
+    });
+
+    const departments = [...new Set(
+      filterOptionsQuery
+        .map(item => item.department)
+        .filter(dept => dept && dept.trim())
+    )].sort();
+
+    const statuses = [...new Set(
+      filterOptionsQuery
+        .map(item => item.status)
+        .filter(status => status && status.trim())
+    )].sort();
+
+    // Calculate pagination
+    const totalRecords = result.count;
+    const totalPages = Math.ceil(totalRecords / limit);
+    const hasNext = page < totalPages;
+    const hasPrev = page > 1;
+
+    return {
+      employees: result.rows,
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalRecords,
+        limit,
+        hasNext,
+        hasPrev,
+      },
+      filters: {
+        departments,
+        statuses,
+      },
+    };
+  }
+
+  // Keep the original findAll method for backward compatibility
   async findAll(
     limit = 50,
     offset = 0,
