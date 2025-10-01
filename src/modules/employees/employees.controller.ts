@@ -107,11 +107,27 @@ export class EmployeesController {
   @ApiOperation({ summary: 'Delete an employee by id' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  remove(
+  async remove(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @TenantId() tenantId: string
   ) {
-    this.logger.log(`Deleting employee ${id} for tenant: ${tenantId}`);
-    return this.employeesService.remove(id, tenantId);
+    try {
+      console.log('🗑️ === CONTROLLER: Employee deletion request received ===');
+      console.log('🆔 Employee ID:', id);
+      console.log('🏢 Tenant ID:', tenantId);
+      
+      this.logger.log(`Deleting employee ${id} for tenant: ${tenantId}`);
+      
+      await this.employeesService.remove(id, tenantId);
+      
+      console.log('✅ Controller: Employee deletion completed successfully');
+      return { message: 'Employee deleted successfully' };
+      
+    } catch (error) {
+      console.log('💥 Controller deletion error:', error.message);
+      console.log('📊 Controller deletion error stack:', error.stack);
+      this.logger.error('💥 Controller deletion error:', error.message);
+      throw error;
+    }
   }
 }

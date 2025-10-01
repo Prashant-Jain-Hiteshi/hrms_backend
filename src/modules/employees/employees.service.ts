@@ -363,11 +363,140 @@ export class EmployeesService {
   }
 
   async remove(id: string, tenantId?: string): Promise<void> {
-    const emp = await this.findOne(id, tenantId);
     try {
+      console.log('🗑️ === EMPLOYEE DELETION START ===');
+      console.log('🆔 Employee ID to delete:', id);
+      console.log('🏢 TenantId:', tenantId);
+      this.logger.log(`Starting deletion of employee ${id} for tenant: ${tenantId}`);
+
+      // Step 1: Find the employee
+      console.log('🔍 Step 1: Finding employee...');
+      const emp = await this.findOne(id, tenantId);
+      console.log('✅ Employee found:', {
+        id: emp.id,
+        employeeId: emp.employeeId,
+        name: emp.name,
+        email: emp.email,
+        tenantId: emp.tenantId
+      });
+
+      // Step 2: Check for related records that might prevent deletion
+      console.log('🔗 Step 2: Checking for related records...');
+      
+      // Check if employee has any leave requests
+      try {
+        const { LeaveRequest } = require('../leave/leave.model');
+        const leaveCount = await LeaveRequest.count({
+          where: { employeeId: emp.id }
+        });
+        console.log('📋 Leave requests found:', leaveCount);
+      } catch (leaveError) {
+        console.log('⚠️ Could not check leave requests:', leaveError.message);
+      }
+
+      // Check if employee has any payroll records
+      try {
+        const { EmployeePayrollRecord } = require('../payroll/models/employee-payroll-record.model');
+        const payrollCount = await EmployeePayrollRecord.count({
+          where: { employeeId: emp.employeeId }
+        });
+        console.log('💰 Payroll records found:', payrollCount);
+      } catch (payrollError) {
+        console.log('⚠️ Could not check payroll records:', payrollError.message);
+      }
+
+      // Check if employee has any attendance records
+      try {
+        const { Attendance } = require('../attendance/attendance.model');
+        const attendanceCount = await Attendance.count({
+          where: { employeeId: emp.id }
+        });
+        console.log('📅 Attendance records found:', attendanceCount);
+      } catch (attendanceError) {
+        console.log('⚠️ Could not check attendance records:', attendanceError.message);
+      }
+
+      // Check if employee has a user account
+      try {
+        const userAccount = await this.usersService.findByEmail(emp.email);
+        if (userAccount) {
+          console.log('👤 User account found:', {
+            id: userAccount.id,
+            email: userAccount.email,
+            role: userAccount.role
+          });
+        } else {
+          console.log('👤 No user account found for this employee');
+        }
+      } catch (userError) {
+        console.log('⚠️ Could not check user account:', userError.message);
+      }
+
+      // Step 3: Attempt deletion
+      console.log('🗑️ Step 3: Attempting to delete employee...');
       await emp.destroy();
-    } catch {
-      throw new InternalServerErrorException('Failed to delete employee');
+      
+      console.log('✅ Employee deleted successfully');
+      this.logger.log(`Successfully deleted employee ${id}`);
+
+    } catch (error) {
+      console.log('💥 === EMPLOYEE DELETION FAILED ===');
+      console.log('❌ Error name:', error.name);
+      console.log('❌ Error message:', error.message);
+      console.log('📊 Error stack:', error.stack);
+      console.log('🆔 Employee ID that failed:', id);
+      console.log('🏢 TenantId that failed:', tenantId);
+      
+      // Log specific database constraint errors
+      if (error.name === 'SequelizeForeignKeyConstraintError') {
+        console.log('🔗 FOREIGN KEY CONSTRAINT ERROR:');
+        console.log('   - Table:', error.table);
+        console.log('   - Fields:', error.fields);
+        console.log('   - Value:', error.value);
+        console.log('   - Index:', error.index);
+        console.log('   - SQL:', error.sql);
+        
+        this.logger.error('Foreign key constraint violation during employee deletion:', {
+          table: error.table,
+          fields: error.fields,
+          value: error.value,
+          index: error.index
+        });
+        
+        throw new InternalServerErrorException(
+          `Cannot delete employee: This employee has related records that must be deleted first. ` +
+          `Constraint: ${error.index} on table ${error.table}`
+        );
+      }
+      
+      if (error.name === 'SequelizeValidationError') {
+        console.log('✅ VALIDATION ERROR:');
+        console.log('   - Errors:', error.errors);
+        this.logger.error('Validation error during employee deletion:', error.errors);
+      }
+      
+      if (error.name === 'SequelizeDatabaseError') {
+        console.log('🗄️ DATABASE ERROR:');
+        console.log('   - SQL:', error.sql);
+        console.log('   - Parameters:', error.parameters);
+        this.logger.error('Database error during employee deletion:', {
+          sql: error.sql,
+          parameters: error.parameters
+        });
+      }
+      
+      this.logger.error('💥 Employee deletion failed:', error.message);
+      this.logger.error('📊 Error stack:', error.stack);
+      
+      // Re-throw known exceptions
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      
+      // For unknown errors, provide detailed error message
+      throw new InternalServerErrorException(
+        `Failed to delete employee: ${error.message}. Check server logs for details.`
+      );
     }
   }
 }

@@ -1205,6 +1205,95 @@ export class LeaveService {
     };
   }
 
+  /**
+   * Get monthly leave trends for the past 6 months (current month + past 5 months)
+   * Returns leave request counts grouped by month for admin dashboard
+   */
+  async getMonthlyLeaveTrends(tenantId: string) {
+    try {
+      console.log('🔍 Getting monthly leave trends for tenant:', tenantId);
+
+      // Calculate date range for past 6 months
+      const currentDate = new Date();
+      const months = [];
+      
+      // Generate past 6 months (current + 5 previous)
+      for (let i = 5; i >= 0; i--) {
+        const date = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
+        months.push({
+          year: date.getFullYear(),
+          month: date.getMonth() + 1, // 1-based month
+          monthName: date.toLocaleDateString('en-US', { month: 'short' }),
+          startDate: new Date(date.getFullYear(), date.getMonth(), 1),
+          endDate: new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59)
+        });
+      }
+
+      console.log('📅 Months to analyze:', months.map(m => `${m.monthName} ${m.year}`));
+
+      // Get leave requests for each month
+      const monthlyData = await Promise.all(
+        months.map(async (monthInfo) => {
+          try {
+            // Get all employees for this tenant first
+            const employees = await this.employeeModel.findAll({
+              where: { tenantId },
+              attributes: ['id']
+            });
+
+            const employeeIds = employees.map(emp => emp.id);
+
+            if (employeeIds.length === 0) {
+              return {
+                month: monthInfo.monthName,
+                year: monthInfo.year,
+                leaves: 0
+              };
+            }
+
+            // Count leave requests for this month and tenant
+            const leaveCount = await this.leaveRequestModel.count({
+              where: {
+                employeeId: { [Op.in]: employeeIds },
+                createdAt: {
+                  [Op.between]: [monthInfo.startDate, monthInfo.endDate]
+                }
+              }
+            });
+
+            console.log(`📊 ${monthInfo.monthName} ${monthInfo.year}: ${leaveCount} leaves`);
+
+            return {
+              month: monthInfo.monthName,
+              year: monthInfo.year,
+              leaves: leaveCount
+            };
+          } catch (error) {
+            console.error(`❌ Error getting data for ${monthInfo.monthName}:`, error);
+            return {
+              month: monthInfo.monthName,
+              year: monthInfo.year,
+              leaves: 0
+            };
+          }
+        })
+      );
+
+      console.log('✅ Monthly leave trends calculated:', monthlyData);
+
+      return {
+        success: true,
+        data: monthlyData,
+        totalMonths: monthlyData.length,
+        totalLeaves: monthlyData.reduce((sum, month) => sum + month.leaves, 0)
+      };
+
+    } catch (error) {
+      console.error('❌ Error in getMonthlyLeaveTrends:', error);
+      throw new BadRequestException('Failed to get monthly leave trends');
+    }
+  }
+
   // Compute monthly deducted (paid leave) and LWP for a date range
   async getMonthlyLedger(employeeId: string, from?: string, to?: string) {
     try {

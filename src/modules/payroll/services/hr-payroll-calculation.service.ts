@@ -1008,8 +1008,8 @@ export class HRPayrollCalculationService {
         employeesPaid,
         totalEmployees,
         avgSalary: Math.round(avgSalary),
-        pendingReimbursements: 1250, // Mock data as requested
-        pendingReimbursementCount: 5 // Mock data as requested
+        pendingReimbursements: 0, // Mock data as requested
+        pendingReimbursementCount: 0 // Mock data as requested
       };
 
       console.log(`✅ Dashboard summary:`, summary);
