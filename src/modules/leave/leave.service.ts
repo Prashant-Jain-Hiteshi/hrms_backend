@@ -262,11 +262,17 @@ export class LeaveService {
           model: Employee,
           as: 'employee',
           attributes: ['id', 'name', 'email', 'employeeId'],
+          where: {
+            department: { [Op.ne]: 'Administration' } // Exclude admin employees
+          }
         },
         {
           model: Employee,
           as: 'approver',
           attributes: ['id', 'name', 'email', 'employeeId'],
+          where: {
+            department: { [Op.ne]: 'Administration' } // Exclude admin employees
+          }
         },
         {
           model: LeaveApprover,
@@ -275,6 +281,9 @@ export class LeaveService {
             {
               model: Employee,
               attributes: ['id', 'name', 'email', 'employeeId'],
+              where: {
+                department: { [Op.ne]: 'Administration' } // Exclude admin employees
+              }
             },
           ],
         },
@@ -285,6 +294,9 @@ export class LeaveService {
             {
               model: Employee,
               attributes: ['id', 'name', 'email', 'employeeId'],
+              where: {
+                department: { [Op.ne]: 'Administration' } // Exclude admin employees
+              }
             },
           ],
         },

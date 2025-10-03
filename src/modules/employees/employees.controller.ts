@@ -125,7 +125,7 @@ export class EmployeesController {
   @Delete(':id')
   @ApiOperation({ summary: 'Delete an employee by id' })
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN,Role.HR)
   async remove(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @TenantId() tenantId: string

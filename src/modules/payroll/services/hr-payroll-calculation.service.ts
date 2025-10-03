@@ -393,6 +393,9 @@ export class HRPayrollCalculationService {
         {
           model: Employee,
           attributes: ['id', 'employeeId', 'name', 'department', 'designation'],
+          where: {
+            department: { [Op.ne]: 'Administration' } // Exclude admin employees
+          }
         },
       ],
       order: [['createdAt', 'DESC']],
@@ -791,12 +794,12 @@ export class HRPayrollCalculationService {
         filterLogic: 'joiningDate <= payrollDate'
       });
 
-      // Get employees who joined on or before the payroll month
+      // Get employees who joined on or before the payroll month (exclude admin)
       const eligibleEmployees = await this.employeeModel.findAll({
         where: {
           tenantId,
           status: 'active',
-          department:"Engineering",
+          department: { [Op.ne]: 'Administration' }, // Exclude admin employees
           joiningDate: {
             [Op.lte]: payrollDate // Joining date <= payroll month
           }
@@ -981,6 +984,7 @@ export class HRPayrollCalculationService {
   // Get dashboard summary for HR overview
   async getDashboardSummary(month: string, tenantId: string): Promise<any> {
     console.log(`🔍 DASHBOARD SUMMARY:`, { month, tenantId });
+    console.log(`🚫 ADMIN FILTER: Excluding employees with department = 'Administration'`);
 
     try {
       const records = await this.payrollRecordModel.findAll({
@@ -989,12 +993,15 @@ export class HRPayrollCalculationService {
           {
             model: Employee,
             as: 'employee',
-            attributes: ['name', 'department', 'employeeId']
+            attributes: ['name', 'department', 'employeeId'],
+            where: {
+              department: { [Op.ne]: 'Administration' } // Exclude admin employees
+            }
           }
         ]
       });
 
-      console.log(`📊 Found ${records.length} payroll records for dashboard`);
+      console.log(`📊 Found ${records.length} payroll records for dashboard (admin excluded)`);
 
       const totalPayroll = records.reduce((sum, r) => sum + Number(r.netSalary || 0), 0);
       const employeesPaid = records.filter(r => 
@@ -1002,6 +1009,14 @@ export class HRPayrollCalculationService {
       ).length;
       const totalEmployees = records.length;
       const avgSalary = totalEmployees > 0 ? totalPayroll / totalEmployees : 0;
+
+      console.log(`📈 Dashboard Summary Calculated:`, {
+        totalEmployees,
+        employeesPaid,
+        totalPayroll,
+        avgSalary,
+        adminExcluded: true
+      });
 
       const summary = {
         totalPayroll: Math.round(totalPayroll),
@@ -1032,7 +1047,10 @@ export class HRPayrollCalculationService {
           {
             model: Employee,
             as: 'employee',
-            attributes: ['department']
+            attributes: ['department'],
+            where: {
+              department: { [Op.ne]: 'Administration' } // Exclude admin employees
+            }
           }
         ]
       });
