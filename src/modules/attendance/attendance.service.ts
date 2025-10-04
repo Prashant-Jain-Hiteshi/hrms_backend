@@ -812,7 +812,10 @@ export class AttendanceService {
             'department',
             'designation',
           ],
-          where: tenantId ? { tenantId } : undefined, // Filter employees by tenant too
+          where: {
+            ...(tenantId ? { tenantId } : {}), // Filter employees by tenant too
+            department: { [Op.ne]: 'Administration' } // Exclude admin employees
+          },
         },
       ],
       order: [['date', 'DESC']],
@@ -824,8 +827,10 @@ export class AttendanceService {
   async listAllByStatus(day: string, status: 'absent', tenantId?: string) {
     if (!day) throw new BadRequestException('day is required');
     
-    // Fetch all employees (tenant-scoped)
-    const employeeWhere: any = {};
+    // Fetch all employees (tenant-scoped, exclude admin)
+    const employeeWhere: any = {
+      department: { [Op.ne]: 'Administration' } // Exclude admin employees
+    };
     if (tenantId) {
       employeeWhere.tenantId = tenantId;
     }
@@ -881,6 +886,8 @@ export class AttendanceService {
 
   // Admin/HR: aggregate current week's attendance per weekday (Mon–Fri)
   async weeklyOverview(tenantId?: string) {
+    console.log('🔍 === WEEKLY OVERVIEW DEBUG - Admin Filter Applied ===');
+    console.log('🚫 Admin Filter: Excluding employees with department = "Administration"');
     // Compute current week's Monday to Sunday range, but only output Mon–Fri
     const today = new Date();
     const day = today.getDay(); // 0..6 (Sun..Sat)
@@ -912,7 +919,10 @@ export class AttendanceService {
       return Number.isFinite(n) ? n : 0;
     };
     try {
-      const employeeWhere: any = { status: 'active' };
+      const employeeWhere: any = { 
+        status: 'active',
+        department: { [Op.ne]: 'Administration' } // Exclude admin employees
+      };
       if (tenantId) {
         employeeWhere.tenantId = tenantId;
       }
@@ -921,15 +931,26 @@ export class AttendanceService {
         where: employeeWhere,
       });
       activeEmployees = normalizeCount(c1);
+      console.log(`📊 Active employees count (admin excluded): ${activeEmployees}`);
       if (activeEmployees <= 0) {
-        const fallbackWhere = tenantId ? { tenantId } : {};
+        const fallbackWhere: any = {
+          department: { [Op.ne]: 'Administration' } // Exclude admin employees
+        };
+        if (tenantId) {
+          fallbackWhere.tenantId = tenantId;
+        }
         const c2 = await (this.employeeModel as any).count({
           where: fallbackWhere,
         });
         activeEmployees = normalizeCount(c2);
       }
     } catch {
-      const fallbackWhere = tenantId ? { tenantId } : {};
+      const fallbackWhere: any = {
+        department: { [Op.ne]: 'Administration' } // Exclude admin employees
+      };
+      if (tenantId) {
+        fallbackWhere.tenantId = tenantId;
+      }
       const c2 = await (this.employeeModel as any).count({
         where: fallbackWhere,
       });
@@ -1134,8 +1155,13 @@ export class AttendanceService {
       whereClause.tenantId = tenantId;
     }
 
-    // Get all employees (tenant-scoped)
-    const employeeWhere = tenantId ? { tenantId } : {};
+    // Get all employees (tenant-scoped, exclude admin)
+    const employeeWhere: any = {
+      department: { [Op.ne]: 'Administration' } // Exclude admin employees
+    };
+    if (tenantId) {
+      employeeWhere.tenantId = tenantId;
+    }
     const totalEmployees = await this.employeeModel.count({
       where: employeeWhere,
     });
@@ -1222,14 +1248,22 @@ export class AttendanceService {
       include: [{
         model: this.employeeModel,
         attributes: ['id', 'firstName', 'lastName', 'email'],
-        where: tenantId ? { tenantId } : undefined, // Filter employees by tenant too
+        where: {
+          ...(tenantId ? { tenantId } : {}), // Filter employees by tenant too
+          department: { [Op.ne]: 'Administration' } // Exclude admin employees
+        },
       }],
       attributes: ['employeeId', 'date', 'status', 'checkIn', 'checkOut', 'hoursWorked'],
       order: [['date', 'ASC']]
     });
 
-    // Get total active employees (tenant-scoped)
-    const employeeWhere = tenantId ? { tenantId } : {};
+    // Get total active employees (tenant-scoped, exclude admin)
+    const employeeWhere: any = {
+      department: { [Op.ne]: 'Administration' } // Exclude admin employees
+    };
+    if (tenantId) {
+      employeeWhere.tenantId = tenantId;
+    }
     const totalEmployees = await this.employeeModel.count({
       where: employeeWhere,
     });

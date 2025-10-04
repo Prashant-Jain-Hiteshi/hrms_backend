@@ -254,6 +254,9 @@ export class PayrollService {
         {
           model: this.employeeModel,
           attributes: ['id', 'name', 'department'],
+          where: {
+            department: { [Op.ne]: 'Administration' } // Exclude admin employees
+          }
         },
       ],
     });

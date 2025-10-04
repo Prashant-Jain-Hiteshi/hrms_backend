@@ -59,23 +59,42 @@ export class EmployeesController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'List employees (paginated)' })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiOperation({ summary: 'List employees with pagination, search and filters' })
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (default: 1)' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Records per page (default: 10)' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Search in name, email, employeeId' })
+  @ApiQuery({ name: 'department', required: false, type: String, description: 'Filter by department' })
+  @ApiQuery({ name: 'status', required: false, type: String, description: 'Filter by status (active/inactive)' })
+  @ApiQuery({ name: 'sortBy', required: false, type: String, description: 'Sort field (default: joiningDate)' })
+  @ApiQuery({ name: 'sortOrder', required: false, type: String, description: 'Sort order: asc/desc (default: desc)' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.HR, Role.FINANCE, Role.EMPLOYEE)
   findAll(
     @TenantId() tenantId: string,
     @CompanyCode() companyCode: string,
-    @Query('limit') limit?: string, 
-    @Query('offset') offset?: string
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('department') department?: string,
+    @Query('status') status?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: string
   ) {
     this.logger.log(`Listing employees for tenant: ${tenantId} (${companyCode})`);
-    return this.employeesService.findAll(
-      Number(limit) || 50,
-      Number(offset) || 0,
-      tenantId
-    );
+    
+    const queryParams = {
+      page: Number(page) || 1,
+      limit: Number(limit) || 10,
+      search: search?.trim() || '',
+      department: department?.trim() || '',
+      status: status?.trim() || '',
+      sortBy: sortBy?.trim() || 'joiningDate',
+      sortOrder: (sortOrder?.toLowerCase() === 'asc' ? 'asc' : 'desc') as 'asc' | 'desc'
+    };
+
+    this.logger.log('Query parameters:', queryParams);
+    
+    return this.employeesService.findAllWithFilters(queryParams, tenantId);
   }
 
   @Get(':id')
@@ -106,12 +125,28 @@ export class EmployeesController {
   @Delete(':id')
   @ApiOperation({ summary: 'Delete an employee by id' })
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
-  remove(
+  @Roles(Role.ADMIN,Role.HR)
+  async remove(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @TenantId() tenantId: string
   ) {
-    this.logger.log(`Deleting employee ${id} for tenant: ${tenantId}`);
-    return this.employeesService.remove(id, tenantId);
+    try {
+      console.log('🗑️ === CONTROLLER: Employee deletion request received ===');
+      console.log('🆔 Employee ID:', id);
+      console.log('🏢 Tenant ID:', tenantId);
+      
+      this.logger.log(`Deleting employee ${id} for tenant: ${tenantId}`);
+      
+      await this.employeesService.remove(id, tenantId);
+      
+      console.log('✅ Controller: Employee deletion completed successfully');
+      return { message: 'Employee deleted successfully' };
+      
+    } catch (error) {
+      console.log('💥 Controller deletion error:', error.message);
+      console.log('📊 Controller deletion error stack:', error.stack);
+      this.logger.error('💥 Controller deletion error:', error.message);
+      throw error;
+    }
   }
 }

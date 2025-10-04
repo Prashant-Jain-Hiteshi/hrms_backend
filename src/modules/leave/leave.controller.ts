@@ -420,4 +420,27 @@ export class LeaveController {
       recordCount: body.monthlyRecords.length
     };
   }
+
+  @Get('dashboard/monthly-trends')
+  @Roles('admin', 'hr')
+  @ApiOperation({ summary: 'Get monthly leave trends for admin dashboard' })
+  @ApiResponse({
+    status: 200,
+    description: 'Monthly leave trends retrieved successfully',
+  })
+  async getMonthlyLeaveTrends(
+    @TenantId() tenantId: string
+  ) {
+    console.log('🔍 GET /leave/dashboard/monthly-trends | tenantId:', tenantId);
+    
+    try {
+      const trends = await this.leaveService.getMonthlyLeaveTrends(tenantId);
+      
+      console.log('✅ Monthly leave trends retrieved successfully');
+      return trends;
+    } catch (error) {
+      console.error('❌ Error getting monthly leave trends:', error);
+      throw error;
+    }
+  }
 }
