@@ -13,6 +13,7 @@ import { CompaniesModule } from './modules/companies/companies.module';
 import { SuperAdminModule } from './modules/super-admin/super-admin.module';
 import { EmailModule } from './modules/email/email.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { RecruitmentModule } from './modules/recruitment/recruitment.module';
 
 @Module({
   imports: [
@@ -66,6 +67,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     SuperAdminModule,
     EmailModule,
     NotificationsModule,
+    RecruitmentModule,
   ],
   controllers: [AppController],
   providers: [AppService],
