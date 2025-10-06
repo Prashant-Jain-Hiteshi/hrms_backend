@@ -3,7 +3,7 @@ import {
   Get,
   Post,
   Body,
-  Patch,
+  Put,
   Param,
   Delete,
   UseGuards,
@@ -72,7 +72,7 @@ export class DepartmentController {
     };
   }
 
-  @Patch(':id')
+  @Put(':id')
   @Roles(Role.ADMIN, Role.HR)
   @ApiOperation({ summary: 'Update department' })
   @ApiResponse({ status: 200, description: 'Department updated successfully' })

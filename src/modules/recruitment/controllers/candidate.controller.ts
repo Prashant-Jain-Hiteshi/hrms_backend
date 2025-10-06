@@ -3,7 +3,7 @@ import {
   Get,
   Post,
   Body,
-  Patch,
+  Put,
   Param,
   Delete,
   Query,
@@ -93,7 +93,7 @@ export class CandidateController {
     }
   }
 
-  @Patch(':id')
+  @Put(':id')
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body(ValidationPipe) updateCandidateDto: UpdateCandidateDto,
@@ -116,7 +116,7 @@ export class CandidateController {
     }
   }
 
-  @Patch(':id/status')
+  @Put(':id/status')
   async updateStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @Body('status', new ParseEnumPipe(CandidateStatus)) status: CandidateStatus,

@@ -3,7 +3,7 @@ import {
   Get,
   Post,
   Body,
-  Patch,
+  Put,
   Param,
   Delete,
   Query,
@@ -96,7 +96,7 @@ export class JobController {
     };
   }
 
-  @Patch(':id')
+  @Put(':id')
   @Roles(Role.ADMIN, Role.HR)
   @ApiOperation({ summary: 'Update job' })
   @ApiResponse({ status: 200, description: 'Job updated successfully' })
