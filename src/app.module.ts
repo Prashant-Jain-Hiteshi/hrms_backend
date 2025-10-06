@@ -14,6 +14,8 @@ import { SuperAdminModule } from './modules/super-admin/super-admin.module';
 import { EmailModule } from './modules/email/email.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { RecruitmentModule } from './modules/recruitment/recruitment.module';
+import { ExpenseModule } from './modules/expense/expense.module';
+import { UploadModule } from './common/upload/upload.module';
 
 @Module({
   imports: [
@@ -68,6 +70,8 @@ import { RecruitmentModule } from './modules/recruitment/recruitment.module';
     EmailModule,
     NotificationsModule,
     RecruitmentModule,
+    ExpenseModule,
+    UploadModule,
   ],
   controllers: [AppController],
   providers: [AppService],
