@@ -12,10 +12,12 @@ import {
   BelongsTo,
 } from 'sequelize-typescript';
 import { ExpenseCategory } from './expense-category.model';
+import { Employee } from '../../employees/employees.model';
 
 export interface ExpenseReimbursementCreationAttributes {
   tenantId: string;
   employeeId: string;
+  employeeName?: string;
   categoryId: string;
   amount: number;
   approvedAmount?: number;
@@ -46,6 +48,10 @@ export class ExpenseReimbursement extends Model<ExpenseReimbursement, ExpenseRei
   @AllowNull(false)
   @Column(DataType.UUID)
   employeeId: string;
+
+  @AllowNull(true)
+  @Column(DataType.STRING)
+  employeeName: string;
 
   @ForeignKey(() => ExpenseCategory)
   @AllowNull(false)
@@ -112,4 +118,8 @@ export class ExpenseReimbursement extends Model<ExpenseReimbursement, ExpenseRei
   // Associations
   @BelongsTo(() => ExpenseCategory)
   category: ExpenseCategory;
+
+  // Try to match by UUID first, then by employeeId string
+  @BelongsTo(() => Employee, { foreignKey: 'employeeId', targetKey: 'id', constraints: false })
+  employee: Employee;
 }

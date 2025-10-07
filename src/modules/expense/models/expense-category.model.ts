@@ -49,7 +49,7 @@ export class ExpenseCategory extends Model<ExpenseCategory, ExpenseCategoryCreat
   isActive: boolean;
 
   @Default(0)
-  @Column(DataType.DECIMAL(5, 2))
+  @Column({ type: DataType.DECIMAL(5, 2), field: 'auto_approval_percent' })
   autoApprovalPercent: number;
 
   @CreatedAt

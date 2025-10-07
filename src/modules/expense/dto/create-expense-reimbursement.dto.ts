@@ -22,6 +22,16 @@ export class CreateExpenseReimbursementDto {
   amount: number;
 
   @ApiProperty({
+    description: 'Pre-calculated approved amount from frontend',
+    example: 750.25,
+    minimum: 0,
+  })
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Transform(({ value }) => parseFloat(value))
+  approvedAmount: number;
+
+  @ApiProperty({
     description: 'Date when expense occurred',
     example: '2024-01-15',
   })

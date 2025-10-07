@@ -92,7 +92,7 @@ export class ExpenseReimbursementController {
   }
 
   @Get()
-  @Roles(UserRole.FINANCE, UserRole.ADMIN)
+  @Roles(UserRole.FINANCE, UserRole.ADMIN, UserRole.HR)
   @ApiOperation({ summary: 'Get all reimbursement requests with filters' })
   @ApiQuery({ name: 'status', required: false, enum: ['submitted', 'approved', 'rejected', 'paid'] })
   @ApiQuery({ name: 'employeeId', required: false })
@@ -124,11 +124,11 @@ export class ExpenseReimbursementController {
   }
 
   @Get('pending')
-  @Roles(UserRole.FINANCE, UserRole.ADMIN)
-  @ApiOperation({ summary: 'Get pending reimbursement requests' })
+  @Roles(UserRole.HR, UserRole.ADMIN, UserRole.FINANCE)
+  @ApiOperation({ summary: 'Get pending reimbursements for approval' })
   @ApiResponse({ status: 200, description: 'Pending reimbursements retrieved successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - Finance or Admin role required' })
+  @ApiResponse({ status: 403, description: 'Forbidden - HR, Admin or Finance role required' })
   async findPending(@TenantId() tenantId: string) {
     try {
       const reimbursements = await this.reimbursementService.findPending(tenantId);
@@ -143,12 +143,31 @@ export class ExpenseReimbursementController {
     }
   }
 
-  @Get('statistics')
+  @Get('approved')
   @Roles(UserRole.FINANCE, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Get approved reimbursements ready for payment (Finance only)' })
+  @ApiResponse({ status: 200, description: 'Approved reimbursements retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - Finance or Admin role required' })
+  async findApproved(@TenantId() tenantId: string) {
+    try {
+      const reimbursements = await this.reimbursementService.findApproved(tenantId);
+      
+      return {
+        success: true,
+        message: 'Approved reimbursements retrieved successfully',
+        data: reimbursements,
+      };
+    } catch (error) {
+      throw new BadRequestException('Failed to fetch approved reimbursements');
+    }
+  }
+
+  @Get('statistics')
+  @Roles(UserRole.FINANCE, UserRole.ADMIN, UserRole.HR)
   @ApiOperation({ summary: 'Get reimbursement statistics' })
   @ApiResponse({ status: 200, description: 'Statistics retrieved successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - Finance or Admin role required' })
   async getStatistics(@TenantId() tenantId: string) {
     try {
       const statistics = await this.reimbursementService.getStatistics(tenantId);
@@ -189,6 +208,43 @@ export class ExpenseReimbursementController {
     }
   }
 
+  @Put(':id/mark-paid')
+  @Roles(UserRole.FINANCE, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Mark approved reimbursement as paid (Finance only)' })
+  @ApiResponse({ status: 200, description: 'Reimbursement marked as paid successfully' })
+  @ApiResponse({ status: 404, description: 'Reimbursement not found' })
+  @ApiResponse({ status: 400, description: 'Bad request - reimbursement not approved' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - Finance or Admin role required' })
+  async markAsPaid(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { comments?: string },
+    @Request() req: any,
+    @TenantId() tenantId: string,
+  ) {
+    try {
+      const financeUserId = req.user.id;
+      
+      const reimbursement = await this.reimbursementService.markAsPaid(
+        id,
+        financeUserId,
+        tenantId,
+        body.comments
+      );
+      
+      return {
+        success: true,
+        message: 'Reimbursement marked as paid successfully',
+        data: reimbursement,
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to mark reimbursement as paid');
+    }
+  }
+
   @Get(':id')
   @Roles(UserRole.EMPLOYEE, UserRole.HR, UserRole.ADMIN, UserRole.FINANCE)
   @ApiOperation({ summary: 'Get reimbursement by ID' })
@@ -216,7 +272,7 @@ export class ExpenseReimbursementController {
   }
 
   @Put(':id/status')
-  @Roles(UserRole.FINANCE, UserRole.ADMIN)
+  @Roles(UserRole.FINANCE, UserRole.ADMIN,UserRole.HR)
   @ApiOperation({ summary: 'Update reimbursement status (approve/reject/pay)' })
   @ApiResponse({ status: 200, description: 'Reimbursement status updated successfully' })
   @ApiResponse({ status: 404, description: 'Reimbursement not found' })
@@ -231,6 +287,7 @@ export class ExpenseReimbursementController {
   ) {
     try {
       const approverId = req.user.id;
+      
       const reimbursement = await this.reimbursementService.updateStatus(
         id,
         updateDto,
@@ -244,12 +301,13 @@ export class ExpenseReimbursementController {
         data: reimbursement,
       };
     } catch (error) {
-      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+      if (error instanceof NotFoundException || error instanceof BadRequestException || error instanceof ForbiddenException) {
         throw error;
       }
       throw new BadRequestException('Failed to update reimbursement status');
     }
   }
+
 
   @Delete(':id')
   @Roles(UserRole.EMPLOYEE, UserRole.HR, UserRole.ADMIN)
@@ -273,9 +331,12 @@ export class ExpenseReimbursementController {
         message: 'Reimbursement cancelled successfully',
       };
     } catch (error) {
+      
       if (error instanceof NotFoundException || error instanceof BadRequestException || error instanceof ForbiddenException) {
+        console.log(error)
         throw error;
       }
+      console.log(error)
       throw new BadRequestException('Failed to cancel reimbursement');
     }
   }
