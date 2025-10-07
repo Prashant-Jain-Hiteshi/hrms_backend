@@ -145,8 +145,8 @@ export class ExpenseReimbursementController {
 
   @Get('approved')
   @Roles(UserRole.FINANCE, UserRole.ADMIN)
-  @ApiOperation({ summary: 'Get approved reimbursements ready for payment (Finance only)' })
-  @ApiResponse({ status: 200, description: 'Approved reimbursements retrieved successfully' })
+  @ApiOperation({ summary: 'Get approved and paid reimbursements for Finance (Finance only)' })
+  @ApiResponse({ status: 200, description: 'Finance reimbursements retrieved successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - Finance or Admin role required' })
   async findApproved(@TenantId() tenantId: string) {
@@ -155,11 +155,11 @@ export class ExpenseReimbursementController {
       
       return {
         success: true,
-        message: 'Approved reimbursements retrieved successfully',
+        message: 'Finance reimbursements retrieved successfully',
         data: reimbursements,
       };
     } catch (error) {
-      throw new BadRequestException('Failed to fetch approved reimbursements');
+      throw new BadRequestException('Failed to fetch finance reimbursements');
     }
   }
 
@@ -178,7 +178,58 @@ export class ExpenseReimbursementController {
         data: statistics,
       };
     } catch (error) {
+      console.error('❌ ERROR - Failed to fetch statistics:', error);
       throw new BadRequestException('Failed to fetch statistics.');
+    }
+  }
+
+  @Get('monthly-trends')
+  @Roles(UserRole.FINANCE, UserRole.ADMIN, UserRole.HR)
+  @ApiOperation({ summary: 'Get monthly expense trends for charts (last 6 months)' })
+  @ApiResponse({ status: 200, description: 'Monthly trends retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - Finance, Admin or HR role required' })
+  async getMonthlyTrends(
+    @TenantId() tenantId: string,
+    @Query('months') months?: string
+  ) {
+    try {
+      const monthsCount = months ? parseInt(months) : 6;
+      console.log(`🔍 DEBUG - Getting monthly trends for ${monthsCount} months`);
+      
+      const trends = await this.reimbursementService.getMonthlyTrends(tenantId, monthsCount);
+      
+      return {
+        success: true,
+        message: 'Monthly trends retrieved successfully',
+        data: trends,
+      };
+    } catch (error) {
+      console.error('❌ ERROR - Failed to fetch monthly trends:', error);
+      throw new BadRequestException('Failed to fetch monthly trends');
+    }
+  }
+
+  @Get('category-breakdown')
+  @Roles(UserRole.FINANCE, UserRole.ADMIN, UserRole.HR)
+  @ApiOperation({ summary: 'Get expense breakdown by admin-configured categories' })
+  @ApiResponse({ status: 200, description: 'Category breakdown retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - Finance, Admin or HR role required' })
+  async getCategoryBreakdown(@TenantId() tenantId: string) {
+    try {
+      console.log(`🔍 DEBUG - Getting category breakdown for tenant ${tenantId}`);
+      
+      const breakdown = await this.reimbursementService.getCategoryBreakdown(tenantId);
+      
+      return {
+        success: true,
+        message: 'Category breakdown retrieved successfully',
+        data: breakdown,
+      };
+    } catch (error) {
+      console.error('❌ ERROR - Failed to fetch category breakdown:', error);
+      throw new BadRequestException('Failed to fetch category breakdown');
     }
   }
 

@@ -212,8 +212,12 @@ export class ExpenseReimbursementService {
 
   async findApproved(tenantId: string): Promise<ExpenseReimbursement[]> {
     try {
-      const approvedReimbursements = await this.reimbursementModel.findAll({
-        where: { tenantId, status: 'approved' },
+      // Finance sees both approved AND paid reimbursements
+      const financeReimbursements = await this.reimbursementModel.findAll({
+        where: { 
+          tenantId, 
+          status: ['approved', 'paid'] // Include both approved and paid
+        },
         include: [
           {
             model: ExpenseCategory,
@@ -221,17 +225,22 @@ export class ExpenseReimbursementService {
             attributes: ['categoryName', 'categoryCode', 'autoApprovalPercent']
           }
         ],
-        order: [['approvedAt', 'DESC']], // Most recently approved first
+        order: [
+          ['status', 'ASC'], // Show approved first, then paid
+          ['approvedAt', 'DESC'] // Most recently approved first within each status
+        ],
       });
       
-      console.log(`🔍 DEBUG - Found ${approvedReimbursements.length} approved reimbursements for tenant ${tenantId}`);
-      approvedReimbursements.forEach(r => {
-        console.log(`🔍 DEBUG - Approved reimbursement: ${r.id} - Status: "${r.status}" - Amount: ${r.amount}`);
+      console.log(`🔍 DEBUG - Found ${financeReimbursements.length} finance reimbursements (approved + paid) for tenant ${tenantId}`);
+      financeReimbursements.forEach(r => {
+        const actualStatus = r.dataValues?.status || r.status;
+        const actualAmount = r.dataValues?.amount || r.amount;
+        console.log(`🔍 DEBUG - Finance reimbursement: ${r.id} - Status: "${actualStatus}" - Amount: ${actualAmount}`);
       });
       
-      return approvedReimbursements;
+      return financeReimbursements;
     } catch (error) {
-      throw new BadRequestException('Failed to fetch approved reimbursements');
+      throw new BadRequestException('Failed to fetch finance reimbursements');
     }
   }
 
@@ -339,27 +348,27 @@ export class ExpenseReimbursementService {
 
       const reimbursement = await this.findOne(id, tenantId);
       
+      // Access status from dataValues (Sequelize model property access issue)
+      const actualStatus = reimbursement.dataValues?.status || reimbursement.status;
+      
       console.log(`🔍 DEBUG - Found reimbursement:`);
       console.log(`🔍 DEBUG - ID: ${reimbursement.id}`);
-      console.log(`🔍 DEBUG - Status: "${reimbursement.status}"`);
-      console.log(`🔍 DEBUG - Status type: ${typeof reimbursement.status}`);
-      console.log(`🔍 DEBUG - Status length: ${reimbursement.status?.length}`);
-      console.log(`🔍 DEBUG - Amount: ${reimbursement.amount}`);
-      console.log(`🔍 DEBUG - ApprovedBy: ${reimbursement.approvedBy}`);
-      console.log(`🔍 DEBUG - ApprovedAt: ${reimbursement.approvedAt}`);
-      console.log(`🔍 DEBUG - Raw reimbursement object:`, JSON.stringify(reimbursement, null, 2));
+      console.log(`🔍 DEBUG - Status (direct): "${reimbursement.status}"`);
+      console.log(`🔍 DEBUG - Status (dataValues): "${reimbursement.dataValues?.status}"`);
+      console.log(`🔍 DEBUG - Actual Status: "${actualStatus}"`);
+      console.log(`🔍 DEBUG - Status type: ${typeof actualStatus}`);
+      console.log(`🔍 DEBUG - Status length: ${actualStatus?.length}`);
 
-      // Check for exact match
-      const isApproved = reimbursement.status === 'approved';
+      // Check for exact match using the correct status value
+      const isApproved = actualStatus === 'approved';
       console.log(`🔍 DEBUG - Status comparison result: ${isApproved}`);
-      console.log(`🔍 DEBUG - Status === 'approved': ${reimbursement.status === 'approved'}`);
-      console.log(`🔍 DEBUG - Status.trim() === 'approved': ${reimbursement.status?.trim() === 'approved'}`);
+      console.log(`🔍 DEBUG - actualStatus === 'approved': ${actualStatus === 'approved'}`);
       
-      if (reimbursement.status !== 'approved') {
+      if (actualStatus !== 'approved') {
         console.log(`❌ ERROR - Status validation failed!`);
         console.log(`❌ ERROR - Expected: "approved" (length: 8)`);
-        console.log(`❌ ERROR - Actual: "${reimbursement.status}" (length: ${reimbursement.status?.length})`);
-        throw new BadRequestException(`Can only mark approved reimbursements as paid. Current status: "${reimbursement.status}"`);
+        console.log(`❌ ERROR - Actual: "${actualStatus}" (length: ${actualStatus?.length})`);
+        throw new BadRequestException(`Can only mark approved reimbursements as paid. Current status: "${actualStatus}"`);
       }
 
       // Update to paid status
@@ -472,6 +481,13 @@ export class ExpenseReimbursementService {
         where: { tenantId, status: 'paid' }
       }) || 0;
 
+      console.log(`🔍 DEBUG - Statistics for tenant ${tenantId}:`, {
+        pendingAmount,
+        approvedAmount,
+        paidAmount,
+        totalWillShow: paidAmount // Only paid amount shown in total
+      });
+
       return {
         counts: {
           pending: totalPending,
@@ -484,11 +500,268 @@ export class ExpenseReimbursementService {
           pending: Number(pendingAmount.toFixed(2)),
           approved: Number(approvedAmount.toFixed(2)),
           paid: Number(paidAmount.toFixed(2)),
-          total: Number((pendingAmount + approvedAmount + paidAmount).toFixed(2))
+          total: Number(paidAmount.toFixed(2)) // Only show paid amount in total
         }
       };
     } catch (error) {
+      console.error('❌ ERROR - Failed to fetch statistics:', error);
       throw new BadRequestException('Failed to fetch statistics');
+    }
+  }
+
+  async getMonthlyTrends(tenantId: string, months: number = 6): Promise<any> {
+    try {
+      console.log(`🔍 DEBUG - Getting monthly trends for tenant ${tenantId}, last ${months} months`);
+      
+      // Calculate date range for last N months
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setMonth(startDate.getMonth() - (months - 1));
+      startDate.setDate(1); // Start from first day of the month
+      
+      console.log(`🔍 DEBUG - Date range: ${startDate.toISOString()} to ${endDate.toISOString()}`);
+
+      // Get all reimbursements in the date range
+      const reimbursements = await this.reimbursementModel.findAll({
+        where: {
+          tenantId,
+          createdAt: {
+            [Op.gte]: startDate,
+            [Op.lte]: endDate
+          }
+        },
+        attributes: [
+          'amount',
+          'approvedAmount', 
+          'status',
+          'createdAt'
+        ],
+        raw: true
+      });
+
+      console.log(`🔍 DEBUG - Found ${reimbursements.length} reimbursements in date range`);
+
+      // Group data by month
+      const monthlyData: { [key: string]: any } = {};
+      
+      // Initialize all months with zero values
+      for (let i = 0; i < months; i++) {
+        const monthDate = new Date();
+        monthDate.setMonth(monthDate.getMonth() - i);
+        const monthKey = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}`;
+        const monthName = monthDate.toLocaleDateString('en-US', { month: 'short' });
+        
+        monthlyData[monthKey] = {
+          month: monthKey,
+          monthName: monthName,
+          totalAmount: 0,
+          approvedAmount: 0,
+          paidAmount: 0, // Add paid amount tracking
+          counts: {
+            approved: 0,
+            pending: 0,
+            rejected: 0,
+            paid: 0,
+            total: 0
+          }
+        };
+      }
+
+      // Process reimbursements and aggregate by month
+      reimbursements.forEach(reimbursement => {
+        const createdDate = new Date(reimbursement.createdAt);
+        const monthKey = `${createdDate.getFullYear()}-${String(createdDate.getMonth() + 1).padStart(2, '0')}`;
+        
+        if (monthlyData[monthKey]) {
+          const amount = parseFloat(String(reimbursement.amount)) || 0;
+          const approvedAmount = parseFloat(String(reimbursement.approvedAmount)) || 0;
+          const status = reimbursement.status;
+
+          monthlyData[monthKey].totalAmount += amount;
+          monthlyData[monthKey].approvedAmount += approvedAmount;
+          monthlyData[monthKey].counts.total += 1;
+
+          // Count by status and add paid amounts
+          if (status === 'approved') {
+            monthlyData[monthKey].counts.approved += 1;
+          } else if (status === 'submitted') {
+            monthlyData[monthKey].counts.pending += 1;
+          } else if (status === 'rejected') {
+            monthlyData[monthKey].counts.rejected += 1;
+          } else if (status === 'paid') {
+            monthlyData[monthKey].counts.paid += 1;
+            monthlyData[monthKey].paidAmount += approvedAmount; // Add to paid amount
+          }
+        }
+      });
+
+      // Convert to array and sort by month (oldest first)
+      const result = Object.values(monthlyData)
+        .sort((a: any, b: any) => a.month.localeCompare(b.month))
+        .map((item: any) => ({
+          ...item,
+          totalAmount: Number(item.totalAmount.toFixed(2)),
+          approvedAmount: Number(item.approvedAmount.toFixed(2)),
+          paidAmount: Number(item.paidAmount.toFixed(2)) // Include paid amount in response
+        }));
+
+      console.log(`🔍 DEBUG - Monthly trends result:`, result);
+      return result;
+
+    } catch (error) {
+      console.error('❌ ERROR - Failed to fetch monthly trends:', error);
+      throw new BadRequestException('Failed to fetch monthly trends');
+    }
+  }
+
+  async getCategoryBreakdown(tenantId: string): Promise<any> {
+    try {
+      console.log(`🔍 DEBUG - Getting category breakdown for tenant ${tenantId}`);
+
+      // First, get all active categories configured by admin
+      const activeCategories = await this.categoryModel.findAll({
+        where: { 
+          tenantId,
+          isActive: true 
+        },
+        attributes: ['id', 'categoryName', 'categoryCode', 'description'],
+        raw: false
+      });
+
+      console.log(`🔍 DEBUG - Found ${activeCategories.length} active categories`);
+      activeCategories.forEach((category, index) => {
+        console.log(`🔍 DEBUG - Active category ${index + 1}:`, {
+          id: category.id,
+          categoryName: category.categoryName,
+          categoryCode: category.categoryCode,
+          description: category.description,
+          dataValues: category.dataValues,
+          rawCategory: JSON.stringify(category, null, 2)
+        });
+      });
+
+      if (activeCategories.length === 0) {
+        console.log(`⚠️ WARNING - No active categories found for tenant ${tenantId}`);
+        return [];
+      }
+
+      // Get category IDs for filtering reimbursements
+      const activeCategoryIds = activeCategories.map(c => c.id);
+
+      // Get reimbursements for these active categories only - PAID ONLY
+      const reimbursements = await this.reimbursementModel.findAll({
+        where: { 
+          tenantId,
+          status: 'paid', // Only include PAID reimbursements
+          categoryId: activeCategoryIds // Only reimbursements with active categories
+        },
+        attributes: ['id', 'categoryId', 'amount', 'approvedAmount'],
+        raw: true // Use raw for simpler data structure
+      });
+
+      console.log(`🔍 DEBUG - Found ${reimbursements.length} reimbursements with active categories`);
+
+      // Create a map of categories for easy lookup
+      const categoryMap: { [key: string]: any } = {};
+      
+      // Initialize all active categories with zero values
+      activeCategories.forEach((category, index) => {
+        const colors = [
+          '#3B82F6', // Blue
+          '#10B981', // Green  
+          '#F59E0B', // Yellow
+          '#EF4444', // Red
+          '#8B5CF6', // Purple
+          '#06B6D4', // Cyan
+          '#F97316', // Orange
+          '#84CC16', // Lime
+          '#EC4899', // Pink
+          '#6B7280'  // Gray
+        ];
+
+        // Handle Sequelize model data properly
+        const categoryData = category.dataValues || category;
+        const categoryName = categoryData.categoryName || category.categoryName;
+        const categoryCode = categoryData.categoryCode || category.categoryCode;
+        const description = categoryData.description || category.description;
+        const categoryId = categoryData.id || category.id;
+
+        console.log(`🔍 DEBUG - Processing category ${index + 1}:`, {
+          categoryId,
+          categoryName,
+          categoryCode,
+          description
+        });
+
+        categoryMap[categoryId] = {
+          categoryName: categoryName,
+          categoryCode: categoryCode,
+          description: description,
+          totalAmount: 0,
+          approvedAmount: 0,
+          paidAmount: 0, // Add paid amount tracking
+          count: 0,
+          color: colors[index % colors.length]
+        };
+      });
+
+      // Process reimbursements and add to category totals
+      reimbursements.forEach((reimbursement: any) => {
+        const categoryId = reimbursement.categoryId;
+        const amount = parseFloat(String(reimbursement.amount)) || 0;
+        const approvedAmount = parseFloat(String(reimbursement.approvedAmount)) || 0;
+
+        console.log(`🔍 DEBUG - Processing reimbursement ${reimbursement.id}:`, {
+          categoryId,
+          amount,
+          approvedAmount
+        });
+
+        if (categoryMap[categoryId]) {
+          categoryMap[categoryId].totalAmount += amount;
+          categoryMap[categoryId].approvedAmount += approvedAmount;
+          categoryMap[categoryId].paidAmount += approvedAmount; // Since all are paid, paidAmount = approvedAmount
+          categoryMap[categoryId].count += 1;
+        } else {
+          console.log(`⚠️ WARNING - Reimbursement ${reimbursement.id} has categoryId ${categoryId} not in active categories`);
+        }
+      });
+
+      // Convert to array (colors already assigned during initialization)
+      const result = Object.values(categoryMap).map((category: any) => ({
+        ...category,
+        totalAmount: Number(category.totalAmount.toFixed(2)),
+        approvedAmount: Number(category.approvedAmount.toFixed(2)),
+        paidAmount: Number(category.paidAmount.toFixed(2)) // Include paid amount in response
+      }));
+
+      console.log(`🔍 DEBUG - Category breakdown result:`, JSON.stringify(result, null, 2));
+      console.log(`🔍 DEBUG - Found ${result.length} categories with data`);
+      
+      // Debug each category
+      result.forEach((category, index) => {
+        console.log(`🔍 DEBUG - Category ${index + 1}:`, {
+          categoryName: category.categoryName,
+          categoryCode: category.categoryCode,
+          totalAmount: category.totalAmount,
+          approvedAmount: category.approvedAmount,
+          paidAmount: category.paidAmount, // Include paid amount in debug
+          count: category.count,
+          color: category.color
+        });
+      });
+
+      // If no categories found, return empty array instead of error
+      if (result.length === 0) {
+        console.log(`⚠️ WARNING - No categories found with reimbursement data`);
+        return [];
+      }
+
+      return result;
+
+    } catch (error) {
+      console.error('❌ ERROR - Failed to fetch category breakdown:', error);
+      throw new BadRequestException('Failed to fetch category breakdown');
     }
   }
 }

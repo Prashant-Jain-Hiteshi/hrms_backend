@@ -99,7 +99,8 @@ export class FileUploadService {
    * Generate public URL for file access
    */
   private generateFileUrl(filePath: string): string {
-    const baseUrl = this.configService.get('BASE_URL', 'http://localhost:3000');
+    // Get base URL from environment, with fallback to localhost
+    const baseUrl = this.configService.get('BASE_URL', 'http://localhost:4000');
     const relativePath = filePath.replace(process.cwd(), '').replace(/\\/g, '/');
     return `${baseUrl}/api/files${relativePath}`;
   }
