@@ -178,7 +178,7 @@ export class ExpenseReimbursementController {
         data: statistics,
       };
     } catch (error) {
-      throw new BadRequestException('Failed to fetch statistics');
+      throw new BadRequestException('Failed to fetch statistics.');
     }
   }
 
