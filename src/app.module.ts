@@ -15,6 +15,7 @@ import { EmailModule } from './modules/email/email.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { RecruitmentModule } from './modules/recruitment/recruitment.module';
 import { ExpenseModule } from './modules/expense/expense.module';
+import { DocumentModule } from './modules/document/document.module';
 import { UploadModule } from './common/upload/upload.module';
 
 @Module({
@@ -46,7 +47,7 @@ import { UploadModule } from './common/upload/upload.module';
         return {
           dialect: 'postgres',
           host: config.get('DB_HOST', 'localhost'),
-          port: parseInt(config.get('DB_PORT', '5432'), 10),
+          port: parseInt(config.get('DB_PORT', '5432'), 3),
           database: config.get('DB_NAME', 'hrm_db'),
           username: config.get('DB_USER', 'postgres'),
           password: config.get('DB_PASS', 'postgres'),
@@ -71,6 +72,7 @@ import { UploadModule } from './common/upload/upload.module';
     NotificationsModule,
     RecruitmentModule,
     ExpenseModule,
+    DocumentModule,
     UploadModule,
   ],
   controllers: [AppController],

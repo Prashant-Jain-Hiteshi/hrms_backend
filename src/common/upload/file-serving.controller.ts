@@ -8,20 +8,18 @@ import { ApiTags, ApiOperation, ApiParam, ApiResponse } from '@nestjs/swagger';
 @Controller('api/files')
 export class FileServingController {
 
-  @Get('uploads/:folder/:subfolder/:filename')
+  @Get('uploads/:folder/:filename')
   @ApiOperation({ summary: 'Serve uploaded files' })
-  @ApiParam({ name: 'folder', description: 'Main folder (expenses, employees, recruitment)' })
-  @ApiParam({ name: 'subfolder', description: 'Subfolder (receipts, documents, resumes)' })
+  @ApiParam({ name: 'folder', description: 'Main folder (documents, expenses, employees, recruitment)' })
   @ApiParam({ name: 'filename', description: 'File name' })
   @ApiResponse({ status: 200, description: 'File served successfully' })
   @ApiResponse({ status: 404, description: 'File not found' })
   async serveFile(
     @Param('folder') folder: string,
-    @Param('subfolder') subfolder: string,
     @Param('filename') filename: string,
     @Res({ passthrough: true }) res: Response
   ): Promise<StreamableFile> {
-    const filePath = join(process.cwd(), 'uploads', folder, subfolder, filename);
+    const filePath = join(process.cwd(), 'uploads', folder, filename);
     
     if (!existsSync(filePath)) {
       throw new NotFoundException('File not found');
@@ -48,20 +46,18 @@ export class FileServingController {
     return new StreamableFile(file);
   }
 
-  @Get('download/uploads/:folder/:subfolder/:filename')
+  @Get('download/uploads/:folder/:filename')
   @ApiOperation({ summary: 'Download uploaded files' })
-  @ApiParam({ name: 'folder', description: 'Main folder (expenses, employees, recruitment)' })
-  @ApiParam({ name: 'subfolder', description: 'Subfolder (receipts, documents, resumes)' })
+  @ApiParam({ name: 'folder', description: 'Main folder (documents, expenses, employees, recruitment)' })
   @ApiParam({ name: 'filename', description: 'File name' })
   @ApiResponse({ status: 200, description: 'File downloaded successfully' })
   @ApiResponse({ status: 404, description: 'File not found' })
   async downloadFile(
     @Param('folder') folder: string,
-    @Param('subfolder') subfolder: string,
     @Param('filename') filename: string,
     @Res({ passthrough: true }) res: Response
   ): Promise<StreamableFile> {
-    const filePath = join(process.cwd(), 'uploads', folder, subfolder, filename);
+    const filePath = join(process.cwd(), 'uploads', folder, filename);
     
     if (!existsSync(filePath)) {
       throw new NotFoundException('File not found');

@@ -17,3 +17,4 @@ export const createMulterOptions = (uploadType: keyof typeof uploadConfigs): Mul
 export const expenseMulterOptions: MulterOptions = createMulterOptions('expenses');
 export const employeeMulterOptions: MulterOptions = createMulterOptions('employees');
 export const recruitmentMulterOptions: MulterOptions = createMulterOptions('recruitment');
+export const documentMulterOptions: MulterOptions = createMulterOptions('documents');

@@ -23,6 +23,11 @@ export const uploadConfigs = {
     destination: 'uploads/recruitment/resumes',
     maxSize: 5 * 1024 * 1024, // 5MB
     allowedTypes: ['pdf', 'doc', 'docx']
+  },
+  documents: {
+    destination: 'uploads/documents',
+    maxSize: 10 * 1024 * 1024, // 10MB
+    allowedTypes: ['pdf', 'doc', 'docx', 'txt', 'xlsx', 'pptx', 'jpg', 'jpeg', 'png']
   }
 };
 
