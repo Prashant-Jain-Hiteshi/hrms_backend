@@ -205,34 +205,20 @@ export class EmployeesService {
       
       console.log('✅ Employee record created successfully:', employee.id);
 
-      // Send welcome email to the new employee
-      console.log('📧 Step 7: Sending welcome email...');
-      try {
-        console.log('📧 Email recipient:', dto.email);
-        const userName = dto.name || `${capFirst} ${lastName}`.trim();
-        const roleDisplayName = this.getRoleDisplayName(role);
-        console.log('📧 Email data:', { userName, email: dto.email, password: temporaryPassword, role: roleDisplayName });
-        
-        const emailSent = await this.authService.sendWelcomeEmail(
-          userName,
-          dto.email,
-          temporaryPassword,
-          roleDisplayName
-        );
-        
-        if (emailSent) {
-          console.log('✅ Welcome email sent successfully to:', dto.email);
-          this.logger.log('✅ Welcome email sent successfully to:', dto.email);
-        } else {
-          console.log('⚠️ Failed to send welcome email to:', dto.email);
-          this.logger.warn('⚠️ Failed to send welcome email to:', dto.email);
-        }
-      } catch (emailError) {
-        // Don't fail the entire operation if email fails
-        console.log('💥 Error sending welcome email:', emailError.message);
-        console.log('📊 Email error stack:', emailError.stack);
-        this.logger.error('💥 Error sending welcome email:', emailError.message);
-      }
+      // Send welcome email in background (fire-and-forget)
+      console.log('📧 Step 7: Initiating background email sending...');
+      const userName = dto.name || `${capFirst} ${lastName}`.trim();
+      const roleDisplayName = this.getRoleDisplayName(role);
+      
+      // Fire-and-forget: don't await this
+      this.sendWelcomeEmailAsync(userName, dto.email, temporaryPassword, roleDisplayName)
+        .catch((error: any) => {
+          // Log error but don't affect the main flow
+          console.log('💥 Background email error:', error.message);
+          this.logger.error('💥 Background email error:', error.message);
+        });
+      
+      console.log('✅ Email queued for background processing');
 
       // Return employee plus temp password info
       console.log('🎉 Step 8: Employee creation completed successfully');
@@ -982,6 +968,47 @@ export class EmployeesService {
         `Failed to delete employee: ${error.message}. ` +
         `Check server logs for details about which deletion steps succeeded or failed.`
       );
+    }
+  }
+
+  /**
+   * Send welcome email in background (fire-and-forget)
+   * This method runs asynchronously without blocking the main API response
+   */
+  private async sendWelcomeEmailAsync(
+    userName: string,
+    email: string,
+    temporaryPassword: string,
+    roleDisplayName: string
+  ): Promise<void> {
+    try {
+      console.log('📧 Background: Starting email send to:', email);
+      console.log('📧 Background: Email data:', { userName, email, role: roleDisplayName });
+      
+      const emailSent = await this.authService.sendWelcomeEmail(
+        userName,
+        email,
+        temporaryPassword,
+        roleDisplayName
+      );
+      
+      if (emailSent) {
+        console.log('✅ Background: Welcome email sent successfully to:', email);
+        this.logger.log('✅ Background: Welcome email sent successfully to:', email);
+      } else {
+        console.log('⚠️ Background: Failed to send welcome email to:', email);
+        this.logger.warn('⚠️ Background: Failed to send welcome email to:', email);
+      }
+    } catch (emailError: any) {
+      // Log error but don't throw - this is fire-and-forget
+      console.log('💥 Background: Error sending welcome email:', emailError.message);
+      console.log('📊 Background: Email error stack:', emailError.stack);
+      this.logger.error('💥 Background: Error sending welcome email:', {
+        error: emailError.message,
+        email,
+        userName,
+        role: roleDisplayName
+      });
     }
   }
 }

@@ -786,22 +786,24 @@ export class HRPayrollCalculationService {
     try {
       // Parse the month (format: YYYY-MM)
       const [year, monthNum] = month.split('-');
-      const payrollDate = new Date(parseInt(year), parseInt(monthNum) - 1, 1); // First day of payroll month
+      const payrollMonthStart = new Date(parseInt(year), parseInt(monthNum) - 1, 1); // First day of payroll month
+      const payrollMonthEnd = new Date(parseInt(year), parseInt(monthNum), 0); // Last day of payroll month
       
       console.log(`📅 PAYROLL DATE FILTER:`, {
         inputMonth: month,
-        payrollDate: payrollDate.toISOString(),
-        filterLogic: 'joiningDate <= payrollDate'
+        payrollMonthStart: payrollMonthStart.toISOString(),
+        payrollMonthEnd: payrollMonthEnd.toISOString(),
+        filterLogic: 'joiningDate <= payrollMonthEnd (includes employees who joined during the month)'
       });
 
-      // Get employees who joined on or before the payroll month (exclude admin)
+      // Get employees who joined on or before the end of the payroll month (includes employees who joined during the month, exclude admin)
       const eligibleEmployees = await this.employeeModel.findAll({
         where: {
           tenantId,
           status: 'active',
           department: { [Op.ne]: 'Administration' }, // Exclude admin employees
           joiningDate: {
-            [Op.lte]: payrollDate // Joining date <= payroll month
+            [Op.lte]: payrollMonthEnd // Joining date <= end of payroll month (includes employees who joined during the month)
           }
         },
         attributes: [
@@ -821,7 +823,7 @@ export class HRPayrollCalculationService {
         employees: eligibleEmployees.map(emp => ({
           name: emp.name,
           joiningDate: emp.joiningDate,
-          eligible: new Date(emp.joiningDate) <= payrollDate
+          eligible: new Date(emp.joiningDate) <= payrollMonthEnd
         }))
       });
 

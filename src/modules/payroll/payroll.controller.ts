@@ -461,7 +461,7 @@ export class PayrollController {
   // Bank Transfer Management Endpoints - NEW
 
   @Get('finance/bank-transfers/:month')
-  @Roles(UserRole.FINANCE, UserRole.ADMIN)
+  @Roles(UserRole.FINANCE, UserRole.ADMIN, UserRole.HR)
   @ApiOperation({ summary: 'Get bank transfer data for Finance-approved payroll' })
   @ApiResponse({
     status: 200,
