@@ -16,6 +16,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { RecruitmentModule } from './modules/recruitment/recruitment.module';
 import { ExpenseModule } from './modules/expense/expense.module';
 import { DocumentModule } from './modules/document/document.module';
+import { PerformanceModule } from './modules/performance/performance.module';
 import { UploadModule } from './common/upload/upload.module';
 
 @Module({
@@ -73,6 +74,7 @@ import { UploadModule } from './common/upload/upload.module';
     RecruitmentModule,
     ExpenseModule,
     DocumentModule,
+    PerformanceModule,
     UploadModule,
   ],
   controllers: [AppController],
