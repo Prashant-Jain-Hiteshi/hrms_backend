@@ -372,7 +372,7 @@ export class LeaveController {
   }
 
   @Get('admin/statistics/all')
-  @Roles('admin')
+  // @Roles('admin')
   @ApiOperation({ summary: 'Get overall leave statistics (Admin only)' })
   @ApiResponse({
     status: 200,

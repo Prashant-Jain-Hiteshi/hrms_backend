@@ -29,7 +29,7 @@ export class ExpenseCategoryController {
   constructor(private readonly expenseCategoryService: ExpenseCategoryService) {}
 
   @Post()
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN,UserRole.HR)
   @ApiOperation({ summary: 'Create a new expense category' })
   @ApiResponse({ status: 201, description: 'Expense category created successfully' })
   @ApiResponse({ status: 400, description: 'Bad request - validation failed or duplicate category' })
@@ -118,7 +118,7 @@ export class ExpenseCategoryController {
   }
 
   @Put(':id')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN,UserRole.HR)
   @ApiOperation({ summary: 'Update expense category' })
   @ApiResponse({ status: 200, description: 'Expense category updated successfully' })
   @ApiResponse({ status: 404, description: 'Expense category not found' })
@@ -146,7 +146,7 @@ export class ExpenseCategoryController {
   }
 
   @Delete(':id')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN,UserRole.HR)
   @ApiOperation({ summary: 'Delete expense category' })
   @ApiResponse({ status: 200, description: 'Expense category deleted successfully' })
   @ApiResponse({ status: 404, description: 'Expense category not found' })
