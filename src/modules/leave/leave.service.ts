@@ -18,7 +18,11 @@ import { User } from '../users/users.model';
 import { CreateLeaveDto, UpdateLeaveStatusDto } from './dto/create-leave.dto';
 import { LeaveStatus } from './leave.types';
 import { LeaveCredit, LeaveCreditConfig } from './leave-credit.model';
+import { EmployeeMonthlyLeaveRecord } from './models/employee-monthly-leave-record.model';
 import { CompensatoryLeaveService } from './compensatory-leave.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationsGateway } from '../notifications/notifications.gateway';
+import { NotificationType } from '../notifications/dto/create-notification.dto';
 
 @Injectable()
 export class LeaveService {
@@ -38,7 +42,11 @@ export class LeaveService {
     private leaveCreditModel: typeof LeaveCredit,
     @InjectModel(LeaveCreditConfig)
     private leaveCreditConfigModel: typeof LeaveCreditConfig,
+    @InjectModel(EmployeeMonthlyLeaveRecord)
+    private employeeMonthlyLeaveRecordModel: typeof EmployeeMonthlyLeaveRecord,
     private compensatoryLeaveService: CompensatoryLeaveService,
+    private notificationsService: NotificationsService,
+    private notificationsGateway: NotificationsGateway,
   ) {}
 
   async createLeaveRequest(employeeId: string, createLeaveDto: CreateLeaveDto) {
@@ -54,17 +62,17 @@ export class LeaveService {
     );
 
     try {
-      // First, get the requesting employee's UUID
+      // First, get the requesting employee's UUID and tenantId
       let requestingEmployee = await this.employeeModel.findOne({
         where: { employeeId },
-        attributes: ['id'],
+        attributes: ['id', 'tenantId'],
       });
 
       // If not found by employeeId string, try by UUID (fallback)
       if (!requestingEmployee && employeeId) {
         requestingEmployee = await this.employeeModel.findOne({
           where: { id: employeeId },
-          attributes: ['id'],
+          attributes: ['id', 'tenantId'],
         });
       }
 
@@ -74,6 +82,7 @@ export class LeaveService {
       }
 
       const requestingEmployeeUuid = requestingEmployee.id;
+      const tenantId = requestingEmployee.tenantId;
 
       // Validate TO employees exist
       const toEmployeesExist = await this.employeeModel.findAll({
@@ -105,6 +114,7 @@ export class LeaveService {
       const leaveRequest = await this.leaveRequestModel.create({
         ...leaveData,
         employeeId: requestingEmployeeUuid, // Use UUID instead of string
+        tenantId: tenantId, // Add tenantId from employee
         status: 'pending',
       });
 
@@ -145,6 +155,68 @@ export class LeaveService {
       this.logger.log(
         `Leave request created successfully id=${leaveRequest.id}`,
       );
+
+      // Send notification to employee (leave request submitted)
+      try {
+        // Calculate days between start and end date
+        const startDate = new Date(leaveData.startDate);
+        const endDate = new Date(leaveData.endDate);
+        const timeDiff = endDate.getTime() - startDate.getTime();
+        const daysDiff = Math.ceil(timeDiff / (1000 * 3600 * 24)) + 1;
+
+        const employeeUser = await this.employeeModel.findOne({
+          where: { id: requestingEmployeeUuid },
+          include: [{ model: User, attributes: ['id'] }],
+        });
+
+        if (employeeUser && employeeUser.user) {
+          await this.notificationsService.createLeaveNotification(
+            employeeUser.user.id,
+            tenantId || '',
+            employeeId || 'Unknown',
+            NotificationType.LEAVE_PENDING,
+            {
+              leaveType: leaveData.leaveType,
+              startDate: leaveData.startDate,
+              endDate: leaveData.endDate,
+              days: daysDiff,
+            },
+            leaveRequest.id
+          );
+
+          // Send real-time notification
+          await this.notificationsGateway.sendToUser(
+            employeeUser.user.id,
+            {
+              type: 'leave_pending',
+              title: 'Leave Request Submitted',
+              message: `Your ${leaveData.leaveType} leave request has been submitted and is pending approval.`,
+              category: 'Leave',
+            }
+          );
+        }
+
+        // Get employee name for notifications
+        const requestingEmployee = await this.employeeModel.findOne({
+          where: { id: requestingEmployeeUuid },
+          attributes: ['name']
+        });
+        const employeeName = requestingEmployee?.name || employeeId || 'Employee';
+
+        // Send notifications to TO (approvers) and CC employees only
+        await this.sendNotificationsToApproversAndCC(
+          leaveRequest.id,
+          employeeName,
+          leaveData.leaveType,
+          daysDiff,
+          tenantId || ''
+        );
+
+      } catch (notificationError) {
+        this.logger.warn('Failed to send leave request notifications:', notificationError);
+        // Don't fail the leave request creation if notification fails
+      }
+
       return this.getLeaveRequestById(leaveRequest.id);
     } catch (err: unknown) {
       const e = err as Error;
@@ -190,11 +262,17 @@ export class LeaveService {
           model: Employee,
           as: 'employee',
           attributes: ['id', 'name', 'email', 'employeeId'],
+          where: {
+            department: { [Op.ne]: 'Administration' } // Exclude admin employees
+          }
         },
         {
           model: Employee,
           as: 'approver',
           attributes: ['id', 'name', 'email', 'employeeId'],
+          where: {
+            department: { [Op.ne]: 'Administration' } // Exclude admin employees
+          }
         },
         {
           model: LeaveApprover,
@@ -203,6 +281,9 @@ export class LeaveService {
             {
               model: Employee,
               attributes: ['id', 'name', 'email', 'employeeId'],
+              where: {
+                department: { [Op.ne]: 'Administration' } // Exclude admin employees
+              }
             },
           ],
         },
@@ -213,6 +294,9 @@ export class LeaveService {
             {
               model: Employee,
               attributes: ['id', 'name', 'email', 'employeeId'],
+              where: {
+                department: { [Op.ne]: 'Administration' } // Exclude admin employees
+              }
             },
           ],
         },
@@ -565,6 +649,65 @@ export class LeaveService {
       comments: updateStatusDto.comments || `Leave ${updateStatusDto.status}`,
     });
 
+    // Send notification to employee about leave status update
+    try {
+      const employeeUser = await this.employeeModel.findOne({
+        where: { id: leaveRequest.employeeId },
+        include: [{ model: User, attributes: ['id'] }],
+        attributes: ['employeeId', 'tenantId'],
+      });
+
+      const approverUser = await this.employeeModel.findOne({
+        where: { id: approverUuid },
+        attributes: ['employeeId'],
+      });
+
+      if (employeeUser && employeeUser.user) {
+        // Calculate days for notification
+        const startDate = new Date(leaveRequest.startDate);
+        const endDate = new Date(leaveRequest.endDate);
+        const timeDiff = endDate.getTime() - startDate.getTime();
+        const daysDiff = Math.ceil(timeDiff / (1000 * 3600 * 24)) + 1;
+
+        const notificationType = updateStatusDto.status === 'approved' 
+          ? NotificationType.LEAVE_APPROVED 
+          : NotificationType.LEAVE_REJECTED;
+
+        await this.notificationsService.createLeaveNotification(
+          employeeUser.user.id,
+          employeeUser.tenantId || '',
+          employeeUser.employeeId || 'Unknown',
+          notificationType,
+          {
+            leaveType: leaveRequest.leaveType,
+            startDate: leaveRequest.startDate.toString(),
+            endDate: leaveRequest.endDate.toString(),
+            days: daysDiff,
+            approvedBy: approverUser?.employeeId,
+            rejectionReason: updateStatusDto.status === 'rejected' ? updateStatusDto.comments : undefined,
+          },
+          leaveRequest.id
+        );
+
+        // Send real-time notification
+        await this.notificationsGateway.sendLeaveApprovalNotification(
+          employeeUser.user.id,
+          employeeUser.tenantId || '',
+          {
+            type: updateStatusDto.status === 'approved' ? 'leave_approved' : 'leave_rejected',
+            title: updateStatusDto.status === 'approved' ? 'Leave Request Approved' : 'Leave Request Rejected',
+            message: updateStatusDto.status === 'approved' 
+              ? `Your ${leaveRequest.leaveType} leave request has been approved.`
+              : `Your ${leaveRequest.leaveType} leave request has been rejected.${updateStatusDto.comments ? ` Reason: ${updateStatusDto.comments}` : ''}`,
+            category: 'Leave',
+          }
+        );
+      }
+    } catch (notificationError) {
+      this.logger.warn('Failed to send leave status update notifications:', notificationError);
+      // Don't fail the status update if notification fails
+    }
+
     return this.getLeaveRequestById(leaveRequestId);
   }
 
@@ -675,14 +818,14 @@ export class LeaveService {
     // Get employee details first - handle both string employeeId and UUID lookups
     let employee = await this.employeeModel.findOne({
       where: { employeeId },
-      attributes: ['id', 'employeeId', 'name', 'joiningDate'],
+      attributes: ['id', 'employeeId', 'name', 'joiningDate', 'tenantId'],
     });
 
     // If not found by employeeId string, try by UUID (fallback)
     if (!employee && employeeId) {
       employee = await this.employeeModel.findOne({
         where: { id: employeeId },
-        attributes: ['id', 'employeeId', 'name', 'joiningDate'],
+        attributes: ['id', 'employeeId', 'name', 'joiningDate', 'tenantId'],
       });
     }
 
@@ -690,9 +833,12 @@ export class LeaveService {
       throw new NotFoundException(`Employee not found with ID: ${employeeId}`);
     }
 
-    // Get active credit configs (dynamic leave types configured by admin)
+    // Get active credit configs for this employee's tenant (dynamic leave types configured by admin)
     const configs = await this.leaveCreditConfigModel.findAll({
-      where: { isActive: true },
+      where: { 
+        isActive: true,
+        tenantId: employee.tenantId 
+      },
       attributes: ['leaveType', 'monthlyCredit', 'maxAnnualLimit'],
       raw: true,
       order: [['leaveType', 'ASC']],
@@ -708,12 +854,12 @@ export class LeaveService {
     if (leaveTypes.length === 0) {
       console.warn('No active leave credit configs found, using fallback hardcoded values');
       leaveTypes.push(
-        { name: 'Annual Leave', numberOfLeaves: 20 },
-        { name: 'Sick Leave', numberOfLeaves: 10 },
-        { name: 'Casual Leave', numberOfLeaves: 5 },
-        { name: 'Maternity Leave', numberOfLeaves: 90 },
-        { name: 'Paternity Leave', numberOfLeaves: 15 },
-        { name: 'Emergency Leave', numberOfLeaves: 3 },
+        { name: 'Annual Leave', numberOfLeaves: 0 },
+        { name: 'Sick Leave', numberOfLeaves: 0 },
+        { name: 'Casual Leave', numberOfLeaves: 0 },
+        { name: 'Maternity Leave', numberOfLeaves: 0 },
+        { name: 'Paternity Leave', numberOfLeaves: 0 },
+        { name: 'Emergency Leave', numberOfLeaves: 0 },
       );
     }
 
@@ -859,47 +1005,84 @@ export class LeaveService {
     return balance;
   }
 
-  // Leave Credit Configuration Methods
-  async configureLeaveCreditConfig(configData: any) {
-    const leaveType = String(configData.leaveType).toLowerCase();
-    const monthlyCredit = Number(configData.monthlyCredit);
-    const isActive = configData.isActive !== false;
+  // Leave Credit Configuration Methods - Tenant-aware
+  async configureLeaveCreditConfig(configData: any, tenantId: string) {
+    try {
+      console.log('🔍 DEBUG configureLeaveCreditConfig - Input:', { configData, tenantId });
+      
+      const leaveType = String(configData.leaveType);
+      const monthlyCredit = Number(configData.monthlyCredit);
+      const isActive = configData.isActive !== false;
 
-    if (!leaveType || Number.isNaN(monthlyCredit)) {
-      throw new BadRequestException('leaveType and monthlyCredit are required');
+      console.log('🔍 DEBUG - Processed values:', { leaveType, monthlyCredit, isActive });
+
+      if (!leaveType || Number.isNaN(monthlyCredit)) {
+        throw new BadRequestException('leaveType and monthlyCredit are required');
+      }
+
+      // Upsert by unique leaveType within tenant
+      console.log('🔍 DEBUG - About to findOrCreate');
+      const [record, created] = await this.leaveCreditConfigModel.findOrCreate({
+        where: { leaveType, tenantId },
+        defaults: { leaveType, monthlyCredit, isActive, tenantId },
+      });
+
+      console.log('🔍 DEBUG - findOrCreate result:', { created, recordId: record?.id });
+
+      if (!created) {
+        console.log('🔍 DEBUG - Updating existing record');
+        await record.update({ monthlyCredit, isActive });
+        console.log('🔍 DEBUG - Update completed');
+      }
+
+      // Return the record directly instead of refetching
+      const finalRecord = !created ? await record.reload() : record;
+      console.log('🔍 DEBUG - Final record prepared');
+      
+      const result = {
+        leaveType: finalRecord.leaveType,
+        monthlyCredit: finalRecord.monthlyCredit,
+        isActive: finalRecord.isActive,
+        updatedAt: finalRecord.updatedAt,
+        createdAt: finalRecord.createdAt,
+      };
+
+      console.log('🔍 DEBUG - Returning result:', result);
+      return result;
+    } catch (error) {
+      console.error('🔍 ERROR in configureLeaveCreditConfig:', error);
+      throw error;
     }
-
-    // Upsert by unique leaveType
-    const [record, created] = await this.leaveCreditConfigModel.findOrCreate({
-      where: { leaveType },
-      defaults: { leaveType, monthlyCredit, isActive },
-    });
-
-    if (!created) {
-      await record.update({ monthlyCredit, isActive });
-    }
-
-    // Refetch to ensure all fields are populated from DB
-    const saved = await this.leaveCreditConfigModel.findOne({
-      where: { leaveType },
-      attributes: ['leaveType', 'monthlyCredit', 'isActive', 'updatedAt', 'createdAt'],
-      raw: true,
-    });
-    if (!saved) {
-      throw new NotFoundException('Failed to persist configuration');
-    }
-    return {
-      leaveType: saved.leaveType,
-      monthlyCredit: saved.monthlyCredit as unknown as number,
-      isActive: saved.isActive as unknown as boolean,
-      updatedAt: saved.updatedAt as unknown as Date,
-      createdAt: saved.createdAt as unknown as Date,
-    };
   }
 
-  async getLeaveCreditConfigs() {
+  async deleteLeaveCreditConfig(leaveType: string, tenantId: string) {
+    try {
+      console.log('🔍 DEBUG deleteLeaveCreditConfig - Input:', { leaveType, tenantId });
+      
+      const deleted = await this.leaveCreditConfigModel.destroy({
+        where: { leaveType, tenantId }
+      });
+
+      if (deleted === 0) {
+        throw new NotFoundException(`Leave credit configuration for '${leaveType}' not found`);
+      }
+
+      console.log('🔍 DEBUG - Delete successful, rows affected:', deleted);
+      return { 
+        message: `Leave credit configuration for '${leaveType}' deleted successfully`,
+        deleted: true 
+      };
+    } catch (error) {
+      console.error('🔍 ERROR in deleteLeaveCreditConfig:', error);
+      throw error;
+    }
+  }
+
+  // Tenant-aware leave credit configurations
+  async getLeaveCreditConfigs(tenantId: string) {
     const rows = await this.leaveCreditConfigModel.findAll({
-      attributes: ['leaveType', 'monthlyCredit', 'isActive'],
+      where: { tenantId },
+      attributes: ['leaveType', 'monthlyCredit', 'isActive', 'tenantId'],
       order: [['leaveType', 'ASC']],
       raw: true,
     });
@@ -907,14 +1090,32 @@ export class LeaveService {
       leaveType: r.leaveType,
       monthlyCredit: r.monthlyCredit != null ? Number(r.monthlyCredit) : 0,
       isActive: !!r.isActive,
+      tenantId: r.tenantId,
     }));
   }
 
-  async updateLeaveCreditConfig(leaveType: string, updateData: any) {
-    const key = String(leaveType).toLowerCase();
-    const record = await this.leaveCreditConfigModel.findOne({ where: { leaveType: key } });
+  // Tenant-aware update leave credit config
+  async updateLeaveCreditConfig(leaveType: string, updateData: any, tenantId: string) {
+    const incoming = String(leaveType);
+
+    // 1) Try exact match within tenant (records are stored with original casing)
+    let record = await this.leaveCreditConfigModel.findOne({
+      where: { leaveType: incoming, tenantId }
+    });
+
+    // 2) Fallback: case-insensitive match (Postgres iLike) within tenant
     if (!record) {
-      throw new NotFoundException('Configuration not found');
+      try {
+        record = await this.leaveCreditConfigModel.findOne({
+          where: { leaveType: { [Op.iLike]: incoming }, tenantId }
+        });
+      } catch {
+        // If dialect doesn't support iLike, keep record as null and fall through
+      }
+    }
+
+    if (!record) {
+      throw new NotFoundException('Configuration not found for this company');
     }
 
     const update: Partial<LeaveCreditConfig> = {} as any;
@@ -929,19 +1130,13 @@ export class LeaveService {
 
     await record.update(update as any);
 
-    const saved = await this.leaveCreditConfigModel.findOne({
-      where: { leaveType: key },
-      attributes: ['leaveType', 'monthlyCredit', 'isActive', 'updatedAt'],
-      raw: true,
-    });
-    if (!saved) {
-      throw new NotFoundException('Failed to fetch updated configuration');
-    }
+    // Reload and return normalized response
+    const saved = await record.reload();
     return {
-      leaveType: saved.leaveType,
-      monthlyCredit: saved.monthlyCredit != null ? Number(saved.monthlyCredit) : 0,
-      isActive: !!saved.isActive,
-      updatedAt: saved.updatedAt as unknown as Date,
+      leaveType: (saved as any).leaveType,
+      monthlyCredit: (saved as any).monthlyCredit != null ? Number((saved as any).monthlyCredit) : 0,
+      isActive: !!(saved as any).isActive,
+      updatedAt: (saved as any).updatedAt as unknown as Date,
     };
   }
 
@@ -1020,6 +1215,95 @@ export class LeaveService {
       approved,
       rejected,
     };
+  }
+
+  /**
+   * Get monthly leave trends for the past 6 months (current month + past 5 months)
+   * Returns leave request counts grouped by month for admin dashboard
+   */
+  async getMonthlyLeaveTrends(tenantId: string) {
+    try {
+      console.log('🔍 Getting monthly leave trends for tenant:', tenantId);
+
+      // Calculate date range for past 6 months
+      const currentDate = new Date();
+      const months = [];
+      
+      // Generate past 6 months (current + 5 previous)
+      for (let i = 5; i >= 0; i--) {
+        const date = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
+        months.push({
+          year: date.getFullYear(),
+          month: date.getMonth() + 1, // 1-based month
+          monthName: date.toLocaleDateString('en-US', { month: 'short' }),
+          startDate: new Date(date.getFullYear(), date.getMonth(), 1),
+          endDate: new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59)
+        });
+      }
+
+      console.log('📅 Months to analyze:', months.map(m => `${m.monthName} ${m.year}`));
+
+      // Get leave requests for each month
+      const monthlyData = await Promise.all(
+        months.map(async (monthInfo) => {
+          try {
+            // Get all employees for this tenant first
+            const employees = await this.employeeModel.findAll({
+              where: { tenantId },
+              attributes: ['id']
+            });
+
+            const employeeIds = employees.map(emp => emp.id);
+
+            if (employeeIds.length === 0) {
+              return {
+                month: monthInfo.monthName,
+                year: monthInfo.year,
+                leaves: 0
+              };
+            }
+
+            // Count leave requests for this month and tenant
+            const leaveCount = await this.leaveRequestModel.count({
+              where: {
+                employeeId: { [Op.in]: employeeIds },
+                createdAt: {
+                  [Op.between]: [monthInfo.startDate, monthInfo.endDate]
+                }
+              }
+            });
+
+            console.log(`📊 ${monthInfo.monthName} ${monthInfo.year}: ${leaveCount} leaves`);
+
+            return {
+              month: monthInfo.monthName,
+              year: monthInfo.year,
+              leaves: leaveCount
+            };
+          } catch (error) {
+            console.error(`❌ Error getting data for ${monthInfo.monthName}:`, error);
+            return {
+              month: monthInfo.monthName,
+              year: monthInfo.year,
+              leaves: 0
+            };
+          }
+        })
+      );
+
+      console.log('✅ Monthly leave trends calculated:', monthlyData);
+
+      return {
+        success: true,
+        data: monthlyData,
+        totalMonths: monthlyData.length,
+        totalLeaves: monthlyData.reduce((sum, month) => sum + month.leaves, 0)
+      };
+
+    } catch (error) {
+      console.error('❌ Error in getMonthlyLeaveTrends:', error);
+      throw new BadRequestException('Failed to get monthly leave trends');
+    }
   }
 
   // Compute monthly deducted (paid leave) and LWP for a date range
@@ -1322,6 +1606,256 @@ export class LeaveService {
     } catch (error) {
       console.error('🚨 ERROR in getMonthlyLedger:', error);
       console.error('🚨 ERROR Stack:', error.stack);
+      throw error;
+    }
+  }
+
+  // New method to save/update monthly leave records (called when employee checks Leave Balance UI)
+  async saveMonthlyLeaveRecords(employeeId: string, monthlyRecords: any[]): Promise<void> {
+    try {
+      console.log(`🔍 DEBUG - Saving monthly leave records for employee ${employeeId}:`, monthlyRecords);
+
+      // Get employee UUID and tenantId
+      let employee = await this.employeeModel.findOne({
+        where: { employeeId },
+        attributes: ['id', 'tenantId'],
+      });
+
+      // Fallback: try by UUID if string lookup fails
+      if (!employee && employeeId) {
+        employee = await this.employeeModel.findOne({
+          where: { id: employeeId },
+          attributes: ['id', 'tenantId'],
+        });
+      }
+
+      if (!employee) {
+        throw new NotFoundException(`Employee not found: ${employeeId}`);
+      }
+
+      const employeeUuid = employee.id;
+      const tenantId = employee.tenantId;
+
+      // Process each monthly record
+      for (const monthlyRecord of monthlyRecords) {
+        const [year, monthNum] = monthlyRecord.ym.split('-').map(Number);
+        
+        // Helper function to safely convert to number (handles NaN)
+        const safeNumber = (value: any): number => {
+          const num = Number(value || 0);
+          return isNaN(num) ? 0 : num;
+        };
+
+        // Prepare the data to save (matching your UI columns exactly)
+        const recordData = {
+          employeeId: employeeUuid,
+          tenantId,
+          month: monthlyRecord.ym,
+          year,
+          opening: safeNumber(monthlyRecord.opening),
+          monthlyCredit: safeNumber(monthlyRecord.monthlyCredit),
+          extraCredit: safeNumber(monthlyRecord.extraCredit),
+          deducted: safeNumber(monthlyRecord.deducted),
+          lwp: safeNumber(monthlyRecord.lwp),
+          closing: safeNumber(monthlyRecord.closing),
+          present: safeNumber(monthlyRecord.present),
+          absent: safeNumber(monthlyRecord.absent),
+          effectivePresent: safeNumber(monthlyRecord.effPresent || monthlyRecord.effectivePresent),
+          effectiveAbsent: safeNumber(monthlyRecord.effAbsent || monthlyRecord.effectiveAbsent),
+          paidDays: safeNumber(monthlyRecord.paidDays), // This is the key field for payroll
+          extraCreditBreakdown: monthlyRecord.extraCreditBreakdown || '',
+          calculatedAt: new Date(),
+        };
+
+        console.log(`🔍 DEBUG - Record data for ${monthlyRecord.ym}:`, recordData);
+
+        // Use findOrCreate to handle unique constraint properly
+        const [dbRecord, created] = await this.employeeMonthlyLeaveRecordModel.findOrCreate({
+          where: {
+            employeeId: employeeUuid,
+            month: monthlyRecord.ym,
+            tenantId,
+          },
+          defaults: recordData,
+        });
+
+        // If record exists, update it
+        if (!created) {
+          await dbRecord.update(recordData);
+        }
+
+        console.log(`🔍 DEBUG - Saved/updated record for ${monthlyRecord.ym}: paidDays=${recordData.paidDays}`);
+      }
+
+      console.log(`✅ Successfully saved ${monthlyRecords.length} monthly leave records for employee ${employeeId}`);
+
+    } catch (error) {
+      console.error(`❌ ERROR - Failed to save monthly leave records for employee ${employeeId}:`, error);
+      throw error;
+    }
+  }
+
+  // Method to get stored paid days for payroll calculation
+  async getStoredPaidDays(employeeId: string, month: string): Promise<number> {
+    try {
+      // Get employee UUID
+      let employee = await this.employeeModel.findOne({
+        where: { employeeId },
+        attributes: ['id', 'tenantId'],
+      });
+
+      // Fallback: try by UUID if string lookup fails
+      if (!employee && employeeId) {
+        employee = await this.employeeModel.findOne({
+          where: { id: employeeId },
+          attributes: ['id', 'tenantId'],
+        });
+      }
+
+      if (!employee) {
+        console.log(`🔍 DEBUG - Employee not found for paid days lookup: ${employeeId}`);
+        return 0;
+      }
+
+      // Find the stored monthly record
+      const record = await this.employeeMonthlyLeaveRecordModel.findOne({
+        where: {
+          employeeId: employee.id,
+          month,
+          tenantId: employee.tenantId,
+        },
+        attributes: ['paidDays', 'calculatedAt'],
+      });
+
+      if (record) {
+        console.log(`🔍 DEBUG - Found stored paid days for ${employeeId}, ${month}: ${record.paidDays} (calculated at: ${record.calculatedAt})`);
+        return Number(record.paidDays || 0);
+      } else {
+        console.log(`🔍 DEBUG - No stored paid days found for ${employeeId}, ${month}`);
+        return 0;
+      }
+
+    } catch (error) {
+      console.error(`❌ ERROR - Failed to get stored paid days for ${employeeId}, ${month}:`, error);
+      return 0;
+    }
+  }
+
+  /**
+   * Send notifications to TO (approvers) and CC employees for new leave request
+   */
+  private async sendNotificationsToApproversAndCC(
+    leaveRequestId: string,
+    employeeName: string,
+    leaveType: string,
+    days: number,
+    tenantId: string
+  ): Promise<void> {
+    try {
+      // Get the leave request data for dates
+      const leaveRequest = await this.leaveRequestModel.findByPk(leaveRequestId);
+      if (!leaveRequest) {
+        throw new Error('Leave request not found');
+      }
+
+      // Get TO employees (approvers)
+      const approvers = await this.leaveApproverModel.findAll({
+        where: { leaveRequestId },
+        include: [
+          {
+            model: Employee,
+            include: [
+              {
+                model: User,
+                attributes: ['id']
+              }
+            ]
+          }
+        ]
+      });
+
+      // Get CC employees
+      const ccEmployees = await this.leaveCcModel.findAll({
+        where: { leaveRequestId },
+        include: [
+          {
+            model: Employee,
+            include: [
+              {
+                model: User,
+                attributes: ['id']
+              }
+            ]
+          }
+        ]
+      });
+
+      const notification = {
+        type: 'leave_request_new',
+        title: 'New Leave Request',
+        message: `${employeeName} has submitted a new ${leaveType} leave request for ${days} days.`,
+        category: 'Leave',
+      };
+
+      const leaveData = {
+        leaveType,
+        startDate: leaveRequest.startDate.toString(),
+        endDate: leaveRequest.endDate.toString(),
+        days,
+      };
+
+      // Send notifications to TO employees (approvers)
+      for (const approver of approvers) {
+        if (approver.employee?.user?.id) {
+          try {
+            await this.notificationsService.createLeaveNotification(
+              approver.employee.user.id,
+              tenantId,
+              approver.employee.employeeId,
+              NotificationType.LEAVE_PENDING,
+              leaveData,
+              leaveRequestId
+            );
+
+            // Send real-time notification
+            await this.notificationsGateway.sendToUser(
+              approver.employee.user.id,
+              notification
+            );
+          } catch (error) {
+            console.warn(`Failed to send notification to approver ${approver.employee.employeeId}:`, error);
+          }
+        }
+      }
+
+      // Send notifications to CC employees
+      for (const ccEmployee of ccEmployees) {
+        if (ccEmployee.employee?.user?.id) {
+          try {
+            await this.notificationsService.createLeaveNotification(
+              ccEmployee.employee.user.id,
+              tenantId,
+              ccEmployee.employee.employeeId,
+              NotificationType.LEAVE_PENDING,
+              leaveData,
+              leaveRequestId
+            );
+
+            // Send real-time notification
+            await this.notificationsGateway.sendToUser(
+              ccEmployee.employee.user.id,
+              notification
+            );
+          } catch (error) {
+            console.warn(`Failed to send notification to CC employee ${ccEmployee.employee.employeeId}:`, error);
+          }
+        }
+      }
+
+      console.log(`✅ Sent notifications to ${approvers.length} approvers and ${ccEmployees.length} CC employees for leave request ${leaveRequestId}`);
+
+    } catch (error) {
+      console.error('Failed to send notifications to approvers and CC:', error);
       throw error;
     }
   }

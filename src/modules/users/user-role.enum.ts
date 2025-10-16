@@ -3,4 +3,5 @@ export enum UserRole {
   MANAGER = 'manager',
   HR = 'hr',
   EMPLOYEE = 'employee',
+  FINANCE = 'finance',
 }

@@ -1,8 +1,10 @@
-import { Table, Column, Model, DataType, PrimaryKey, AutoIncrement, CreatedAt, UpdatedAt } from 'sequelize-typescript';
+import { Table, Column, Model, DataType, PrimaryKey, AutoIncrement, CreatedAt, UpdatedAt, ForeignKey, BelongsTo, AllowNull } from 'sequelize-typescript';
+import { Company } from '../companies/companies.model';
 
 interface HolidayCreationAttributes {
   date: string; // yyyy-mm-dd
   name: string;
+  tenantId: string;
   type?: 'public' | 'restricted' | 'optional';
   isActive?: boolean;
 }
@@ -28,6 +30,15 @@ export class Holiday extends Model<Holiday, HolidayCreationAttributes> {
     allowNull: false,
   })
   declare name: string;
+
+  // Tenant relationship
+  @AllowNull(false)
+  @ForeignKey(() => Company)
+  @Column({ type: DataType.UUID })
+  declare tenantId: string;
+
+  @BelongsTo(() => Company)
+  declare company?: Company;
 
   @Column({
     type: DataType.ENUM('public', 'restricted', 'optional'),

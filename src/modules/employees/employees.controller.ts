@@ -9,6 +9,7 @@ import {
   Put,
   Query,
   UseGuards,
+  Logger,
 } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { EmployeesService } from './employees.service';
@@ -18,10 +19,13 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Role } from '../../common/enums/role.enum';
+import { TenantId, CompanyCode } from '../../common/decorators/tenant.decorator';
 
 @ApiTags('Employees')
 @Controller('employees')
 export class EmployeesController {
+  private readonly logger = new Logger(EmployeesController.name);
+
   constructor(private readonly employeesService: EmployeesService) {}
 
   @Post()
@@ -29,29 +33,80 @@ export class EmployeesController {
   @ApiResponse({ status: 201, description: 'Employee created successfully' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.HR)
-  create(@Body() dto: CreateEmployeeDto) {
-    return this.employeesService.create(dto);
+  create(
+    @Body() dto: CreateEmployeeDto,
+    @TenantId() tenantId: string,
+    @CompanyCode() companyCode: string
+  ) {
+    try {
+      console.log('🚀 === CONTROLLER: Employee creation request received ===');
+      console.log('🏢 Tenant:', tenantId);
+      console.log('🏢 Company Code:', companyCode);
+      console.log('📝 Request DTO:', JSON.stringify(dto, null, 2));
+      
+      this.logger.log(`Creating employee for tenant: ${tenantId} (${companyCode})`);
+      
+      const result = this.employeesService.create(dto, tenantId);
+      console.log('✅ Controller: Service call initiated successfully');
+      return result;
+      
+    } catch (error) {
+      console.log('💥 Controller error:', error.message);
+      console.log('📊 Controller error stack:', error.stack);
+      this.logger.error('💥 Controller error:', error.message);
+      throw error;
+    }
   }
 
   @Get()
-  @ApiOperation({ summary: 'List employees (paginated)' })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiOperation({ summary: 'List employees with pagination, search and filters' })
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (default: 1)' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Records per page (default: 10)' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Search in name, email, employeeId' })
+  @ApiQuery({ name: 'department', required: false, type: String, description: 'Filter by department' })
+  @ApiQuery({ name: 'status', required: false, type: String, description: 'Filter by status (active/inactive)' })
+  @ApiQuery({ name: 'sortBy', required: false, type: String, description: 'Sort field (default: joiningDate)' })
+  @ApiQuery({ name: 'sortOrder', required: false, type: String, description: 'Sort order: asc/desc (default: desc)' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.HR, Role.FINANCE, Role.EMPLOYEE)
-  findAll(@Query('limit') limit?: string, @Query('offset') offset?: string) {
-    return this.employeesService.findAll(
-      Number(limit) || 50,
-      Number(offset) || 0,
-    );
+  findAll(
+    @TenantId() tenantId: string,
+    @CompanyCode() companyCode: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('department') department?: string,
+    @Query('status') status?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: string
+  ) {
+    this.logger.log(`Listing employees for tenant: ${tenantId} (${companyCode})`);
+    
+    const queryParams = {
+      page: Number(page) || 1,
+      limit: Number(limit) || 10,
+      search: search?.trim() || '',
+      department: department?.trim() || '',
+      status: status?.trim() || '',
+      sortBy: sortBy?.trim() || 'joiningDate',
+      sortOrder: (sortOrder?.toLowerCase() === 'asc' ? 'asc' : 'desc') as 'asc' | 'desc'
+    };
+
+    this.logger.log('Query parameters:', queryParams);
+    
+    return this.employeesService.findAllWithFilters(queryParams, tenantId);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get an employee by id' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.HR, Role.FINANCE, Role.EMPLOYEE)
-  findOne(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
-    return this.employeesService.findOne(id);
+  findOne(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @TenantId() tenantId: string
+  ) {
+    this.logger.log(`Finding employee ${id} for tenant: ${tenantId}`);
+    return this.employeesService.findOne(id, tenantId);
   }
 
   @Put(':id')
@@ -61,15 +116,37 @@ export class EmployeesController {
   update(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() dto: UpdateEmployeeDto,
+    @TenantId() tenantId: string
   ) {
-    return this.employeesService.update(id, dto);
+    this.logger.log(`Updating employee ${id} for tenant: ${tenantId}`);
+    return this.employeesService.update(id, dto, tenantId);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete an employee by id' })
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
-  remove(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
-    return this.employeesService.remove(id);
+  @Roles(Role.ADMIN,Role.HR)
+  async remove(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @TenantId() tenantId: string
+  ) {
+    try {
+      console.log('🗑️ === CONTROLLER: Employee deletion request received ===');
+      console.log('🆔 Employee ID:', id);
+      console.log('🏢 Tenant ID:', tenantId);
+      
+      this.logger.log(`Deleting employee ${id} for tenant: ${tenantId}`);
+      
+      await this.employeesService.remove(id, tenantId);
+      
+      console.log('✅ Controller: Employee deletion completed successfully');
+      return { message: 'Employee deleted successfully' };
+      
+    } catch (error) {
+      console.log('💥 Controller deletion error:', error.message);
+      console.log('📊 Controller deletion error stack:', error.stack);
+      this.logger.error('💥 Controller deletion error:', error.message);
+      throw error;
+    }
   }
 }

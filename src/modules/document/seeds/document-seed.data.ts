@@ -1,0 +1,133 @@
+// Default document categories based on your UI mockup
+export const DEFAULT_DOCUMENT_CATEGORIES = [
+  {
+    categoryName: 'HR Policies',
+    categoryCode: 'HR_POL',
+    description: 'Company policies and procedures',
+    icon: 'users',
+    color: '#3B82F6',
+    sortOrder: 1,
+    isActive: true,
+  },
+  {
+    categoryName: 'Employee Documents',
+    categoryCode: 'EMP_DOC',
+    description: 'Personal employee files and records',
+    icon: 'user-check',
+    color: '#10B981',
+    sortOrder: 2,
+    isActive: true,
+  },
+  {
+    categoryName: 'Performance',
+    categoryCode: 'PERF',
+    description: 'Performance reviews and evaluations',
+    icon: 'trending-up',
+    color: '#F59E0B',
+    sortOrder: 3,
+    isActive: true,
+  },
+  {
+    categoryName: 'Training Materials',
+    categoryCode: 'TRAIN_MAT',
+    description: 'Training documents and resources',
+    icon: 'book-open',
+    color: '#8B5CF6',
+    sortOrder: 4,
+    isActive: true,
+  },
+  {
+    categoryName: 'Compliance',
+    categoryCode: 'COMP',
+    description: 'Legal and compliance documents',
+    icon: 'shield-check',
+    color: '#EF4444',
+    sortOrder: 5,
+    isActive: true,
+  },
+  {
+    categoryName: 'Templates',
+    categoryCode: 'TMPL',
+    description: 'Document templates and forms',
+    icon: 'file-text',
+    color: '#06B6D4',
+    sortOrder: 6,
+    isActive: true,
+  },
+];
+
+// Default document types based on your UI mockup
+export const DEFAULT_DOCUMENT_TYPES = [
+  {
+    typeName: 'Policy',
+    typeCode: 'POL',
+    description: 'Company policy documents',
+    allowedExtensions: ['pdf', 'doc', 'docx'],
+    maxFileSize: 10485760, // 10MB
+    icon: 'file-text',
+    color: '#3B82F6',
+    requiresApproval: true,
+    sortOrder: 1,
+    isActive: true,
+  },
+  {
+    typeName: 'Template',
+    typeCode: 'TMPL',
+    description: 'Document templates and forms',
+    allowedExtensions: ['pdf', 'doc', 'docx', 'xlsx', 'ppt', 'pptx'],
+    maxFileSize: 5242880, // 5MB
+    icon: 'layout-template',
+    color: '#10B981',
+    requiresApproval: false,
+    sortOrder: 2,
+    isActive: true,
+  },
+  {
+    typeName: 'Certificate',
+    typeCode: 'CERT',
+    description: 'Certificates and credentials',
+    allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png'],
+    maxFileSize: 2097152, // 2MB
+    icon: 'award',
+    color: '#F59E0B',
+    requiresApproval: false,
+    sortOrder: 3,
+    isActive: true,
+  },
+  {
+    typeName: 'Personal',
+    typeCode: 'PERS',
+    description: 'Personal employee documents',
+    allowedExtensions: ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png'],
+    maxFileSize: 5242880, // 5MB
+    icon: 'user',
+    color: '#8B5CF6',
+    requiresApproval: true,
+    sortOrder: 4,
+    isActive: true,
+  },
+  {
+    typeName: 'Training',
+    typeCode: 'TRAIN',
+    description: 'Training materials and resources',
+    allowedExtensions: ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'mp4', 'avi'],
+    maxFileSize: 52428800, // 50MB
+    icon: 'graduation-cap',
+    color: '#EF4444',
+    requiresApproval: false,
+    sortOrder: 5,
+    isActive: true,
+  },
+  {
+    typeName: 'Compliance',
+    typeCode: 'COMP',
+    description: 'Legal and compliance documents',
+    allowedExtensions: ['pdf', 'doc', 'docx'],
+    maxFileSize: 10485760, // 10MB
+    icon: 'shield-check',
+    color: '#06B6D4',
+    requiresApproval: true,
+    sortOrder: 6,
+    isActive: true,
+  },
+];

@@ -11,6 +11,7 @@ import {
   HasMany,
 } from 'sequelize-typescript';
 import { Employee } from '../employees/employees.model';
+import { Company } from '../companies/companies.model';
 import { LeaveType, LeaveStatus } from './leave.types';
 
 @Table({ tableName: 'leave_requests', timestamps: true })
@@ -28,28 +29,20 @@ export class LeaveRequest extends Model {
   @BelongsTo(() => Employee, 'employeeId')
   declare employee: Employee;
 
+  // Tenant relationship
+  @AllowNull(false)
+  @ForeignKey(() => Company)
+  @Column({ type: DataType.UUID })
+  declare tenantId: string;
+
+  @BelongsTo(() => Company)
+  declare company?: Company;
+
   @AllowNull(false)
   @Column({
-    type: DataType.ENUM(
-      'sick',
-      'casual',
-      'annual',
-      'maternity',
-      'paternity',
-      'emergency',
-      'other',
-      'bereavement',
-    ),
+    type: DataType.STRING(100),
   })
-  declare leaveType:
-    | 'sick'
-    | 'casual'
-    | 'annual'
-    | 'maternity'
-    | 'paternity'
-    | 'emergency'
-    | 'other'
-    | 'bereavement';
+  declare leaveType: string;
 
   @AllowNull(false)
   @Column(DataType.DATEONLY)

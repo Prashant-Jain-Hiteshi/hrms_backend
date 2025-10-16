@@ -25,6 +25,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { LeaveService } from './leave.service';
 import { CreateLeaveDto, UpdateLeaveStatusDto } from './dto/create-leave.dto';
+import { TenantId, CompanyCode } from '../../common/decorators/tenant.decorator';
 
 type AuthUser = {
   id: string;
@@ -143,16 +144,19 @@ export class LeaveController {
   @Roles('admin')
   @ApiOperation({ summary: 'Configure monthly leave credits (Admin only)' })
   @ApiResponse({ status: 201, description: 'Leave credit configuration created successfully' })
-  async configureLeaveCreditConfig(@Body() configData: any) {
-    return this.leaveService.configureLeaveCreditConfig(configData);
+  async configureLeaveCreditConfig(
+    @Body() configData: any,
+    @TenantId() tenantId: string
+  ) {
+    return this.leaveService.configureLeaveCreditConfig(configData, tenantId);
   }
 
   @Get('credit-config')
   @Roles('admin', 'hr', 'employee')
   @ApiOperation({ summary: 'Get leave credit configurations' })
   @ApiResponse({ status: 200, description: 'Leave credit configurations retrieved successfully' })
-  async getLeaveCreditConfigs() {
-    return this.leaveService.getLeaveCreditConfigs();
+  async getLeaveCreditConfigs(@TenantId() tenantId: string) {
+    return this.leaveService.getLeaveCreditConfigs(tenantId);
   }
 
   @Put('credit-config/:leaveType')
@@ -161,9 +165,21 @@ export class LeaveController {
   @ApiResponse({ status: 200, description: 'Leave credit configuration updated successfully' })
   async updateLeaveCreditConfig(
     @Param('leaveType') leaveType: string,
-    @Body() updateData: any
+    @Body() updateData: any,
+    @TenantId() tenantId: string
   ) {
-    return this.leaveService.updateLeaveCreditConfig(leaveType, updateData);
+    return this.leaveService.updateLeaveCreditConfig(leaveType, updateData, tenantId);
+  }
+
+  @Delete('credit-config/:leaveType')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Delete leave credit configuration (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Leave credit configuration deleted successfully' })
+  async deleteLeaveCreditConfig(
+    @Param('leaveType') leaveType: string,
+    @TenantId() tenantId: string
+  ) {
+    return this.leaveService.deleteLeaveCreditConfig(leaveType, tenantId);
   }
 
   // Admin: Manual credit leave
@@ -356,7 +372,7 @@ export class LeaveController {
   }
 
   @Get('admin/statistics/all')
-  @Roles('admin')
+  // @Roles('admin')
   @ApiOperation({ summary: 'Get overall leave statistics (Admin only)' })
   @ApiResponse({
     status: 200,
@@ -368,5 +384,63 @@ export class LeaveController {
   })
   async getOverallStatistics() {
     return this.leaveService.getLeaveStatistics();
+  }
+
+  @Post('save-monthly-records')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ 
+    summary: 'Save monthly leave records from Leave Balance UI',
+    description: 'Called when employee views Leave Balance to store calculated paid days for payroll'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Monthly records saved successfully',
+  })
+  async saveMonthlyLeaveRecords(
+    @Request() req: { user: AuthUser },
+    @Body() body: { monthlyRecords: any[] }
+  ) {
+    const user = req.user;
+    console.log('🔍 DEBUG - Save monthly records request:', {
+      userId: user.id,
+      employeeId: user.employeeId,
+      recordCount: body.monthlyRecords?.length || 0
+    });
+
+    if (!body.monthlyRecords || !Array.isArray(body.monthlyRecords)) {
+      throw new BadRequestException('monthlyRecords array is required');
+    }
+
+    await this.leaveService.saveMonthlyLeaveRecords(user.employeeId, body.monthlyRecords);
+    
+    return {
+      success: true,
+      message: `Saved ${body.monthlyRecords.length} monthly leave records`,
+      recordCount: body.monthlyRecords.length
+    };
+  }
+
+  @Get('dashboard/monthly-trends')
+  @Roles('admin', 'hr')
+  @ApiOperation({ summary: 'Get monthly leave trends for admin dashboard' })
+  @ApiResponse({
+    status: 200,
+    description: 'Monthly leave trends retrieved successfully',
+  })
+  async getMonthlyLeaveTrends(
+    @TenantId() tenantId: string
+  ) {
+    console.log('🔍 GET /leave/dashboard/monthly-trends | tenantId:', tenantId);
+    
+    try {
+      const trends = await this.leaveService.getMonthlyLeaveTrends(tenantId);
+      
+      console.log('✅ Monthly leave trends retrieved successfully');
+      return trends;
+    } catch (error) {
+      console.error('❌ Error getting monthly leave trends:', error);
+      throw error;
+    }
   }
 }

@@ -7,11 +7,16 @@ import {
   AutoIncrement,
   CreatedAt,
   UpdatedAt,
+  ForeignKey,
+  BelongsTo,
+  AllowNull,
 } from 'sequelize-typescript';
+import { Company } from '../companies/companies.model';
 
 interface LeaveTypeCreationAttributes {
   name: string;
   numberOfLeaves: number;
+  tenantId: string;
   description?: string;
   requiresApproval?: boolean;
   carryForward?: boolean;
@@ -35,6 +40,15 @@ export class LeaveType extends Model<LeaveType, LeaveTypeCreationAttributes> {
     allowNull: false,
   })
   name: string;
+
+  // Tenant relationship
+  @AllowNull(false)
+  @ForeignKey(() => Company)
+  @Column({ type: DataType.UUID })
+  declare tenantId: string;
+
+  @BelongsTo(() => Company)
+  declare company?: Company;
 
   @Column({
     type: DataType.INTEGER,
